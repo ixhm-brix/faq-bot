@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Documents — FAQ Bot Portal{% endblock %}
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-2xl font-semibold tracking-tight">FAQ Documents</h1>
+  <p class="text-sm text-gray-500 mt-1">Upload PDFs the bot should answer questions from. Changes apply immediately.</p>
+</div>
+
+{% if message %}
+  <div class="mb-4 p-3 rounded bg-green-50 border border-green-200 text-green-800 text-sm">{{ message }}</div>
+{% endif %}
+{% if error %}
+  <div class="mb-4 p-3 rounded bg-red-50 border border-red-200 text-red-800 text-sm">{{ error }}</div>
+{% endif %}
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+  <h2 class="text-lg font-medium mb-1">Assistant settings</h2>
+  <p class="text-xs text-gray-500 mb-4">Changes take effect immediately — no restart needed.</p>
+  <form method="post" action="/settings" class="space-y-4">
+    <div>
+      <label class="block text-sm font-medium text-gray-700">Assistant name</label>
+      <p class="text-xs text-gray-500 mt-0.5">Used when users ask the bot who it is.</p>
+      <input type="text" name="bot_name" value="{{ bot_name }}" required maxlength="40"
+             placeholder="e.g. Acme Helper"
+             class="mt-2 w-full text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700">Receptionist Telegram chat ID</label>
+      <p class="text-xs text-gray-500 mt-0.5">When the bot can't answer, the question is forwarded here. Leave empty to only log questions to the inbox. To find your chat ID: start a chat with the bot and send <code class="bg-gray-100 px-1 rounded">/myid</code>{% if open_handoffs %} · <a href="/inbox" class="text-blue-600 hover:underline">{{ open_handoffs }} open handoff{{ '' if open_handoffs == 1 else 's' }}</a>{% endif %}.</p>
+      <input type="text" name="handoff_chat_id" value="{{ handoff_chat_id }}" maxlength="20"
+             placeholder="e.g. 123456789"
+             class="mt-2 w-full text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700">Match strictness</label>
+      <p class="text-xs text-gray-500 mt-0.5">Maximum vector distance for a document chunk to be treated as relevant. <span class="font-medium">Lower = stricter</span> (more "I don't know" answers and handoffs). <span class="font-medium">Higher = looser</span> (the bot tries harder to use what it has). Default <span class="font-mono">1.80</span>; range <span class="font-mono">0.5</span>–<span class="font-mono">2.5</span>. FAQ-style docs do well around 1.7–1.9; dense technical manuals may need 1.4–1.6.</p>
+      <input type="number" name="retrieval_threshold" value="{{ retrieval_threshold }}"
+             step="0.05" min="0.5" max="2.5"
+             class="mt-2 w-32 text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+    </div>
+    <div class="pt-1">
+      <button class="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded text-sm font-medium transition">Save settings</button>
+    </div>
+  </form>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+  <h2 class="text-lg font-medium mb-1">Upload a PDF</h2>
+  <p class="text-xs text-gray-500 mb-3">Processing happens after upload and may take a few seconds for larger documents.</p>
+  <form method="post" action="/upload" enctype="multipart/form-data" class="flex items-center gap-3">
+    <input type="file" name="file" accept="application/pdf" required
+           class="flex-1 text-sm file:mr-3 file:py-2 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-800 hover:file:bg-gray-200">
+    <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium transition">Upload &amp; ingest</button>
+  </form>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+  <div class="flex items-start justify-between mb-2 gap-4">
+    <div>
+      <h2 class="text-lg font-medium">Sample questions on /start</h2>
+      <p class="text-xs text-gray-500 mt-0.5">One per line, max 6. Click <span class="font-medium">Regenerate from docs</span> to have the AI fill these from your PDFs — you can then edit, add, or remove freely before saving.</p>
+    </div>
+    <form method="post" action="/suggestions/refresh" class="shrink-0">
+      <button class="text-sm text-gray-700 hover:text-gray-900 border border-gray-300 hover:bg-gray-50 rounded px-3 py-1.5 font-medium">Regenerate from docs</button>
+    </form>
+  </div>
+  <form method="post" action="/suggestions" class="mt-3 space-y-3">
+    <textarea name="suggestions" rows="6" maxlength="600"
+              class="w-full text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="What are your opening hours?&#10;How do I book an appointment?">{% for q in suggestions %}{{ q }}
+{% endfor %}</textarea>
+    <button class="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded text-sm font-medium transition">Save suggestions</button>
+  </form>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-200">
+  <div class="px-6 py-4 border-b border-gray-200 flex items-baseline justify-between">
+    <h2 class="text-lg font-medium">Ingested documents</h2>
+    <span class="text-xs text-gray-500">{{ documents|length }} file{{ '' if documents|length == 1 else 's' }}</span>
+  </div>
+  {% if documents %}
+    <ul class="divide-y divide-gray-200">
+      {% for doc in documents %}
+        <li class="px-6 py-3 flex items-center justify-between">
+          <div>
+            <p class="font-medium text-gray-900">{{ doc.source }}</p>
+            <p class="text-xs text-gray-500 mt-0.5">{{ doc.chunks }} chunk{{ '' if doc.chunks == 1 else 's' }}</p>
+          </div>
+          <form method="post" action="/delete"
+                onsubmit="return confirm('Delete {{ doc.source }} and all its chunks? The bot will no longer answer from this document.')">
+            <input type="hidden" name="source" value="{{ doc.source }}">
+            <button class="text-sm text-red-600 hover:text-red-800 font-medium">Delete</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="px-6 py-10 text-center text-sm text-gray-500">No documents ingested yet. Upload a PDF above to get started.</p>
+  {% endif %}
+</div>
+{% endblock %}

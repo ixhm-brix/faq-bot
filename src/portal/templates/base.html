@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}FAQ Bot Portal{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen text-gray-900">
+  <nav class="bg-white border-b border-gray-200">
+    <div class="max-w-4xl mx-auto px-4 py-3 flex justify-between items-center">
+      <a href="/" class="font-semibold tracking-tight">FAQ Bot Portal</a>
+      {% if user %}
+        <div class="flex items-center gap-5 text-sm">
+          <a href="/dashboard" class="text-gray-700 hover:text-gray-900">Documents</a>
+          <a href="/inbox" class="text-gray-700 hover:text-gray-900">Inbox</a>
+          <span class="text-gray-400">|</span>
+          <span class="text-gray-500">Signed in as <span class="font-medium text-gray-800">{{ user }}</span></span>
+          <a href="/logout" class="text-gray-600 hover:text-gray-900">Sign out</a>
+        </div>
+      {% endif %}
+    </div>
+  </nav>
+  <main class="max-w-4xl mx-auto px-4 py-8">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

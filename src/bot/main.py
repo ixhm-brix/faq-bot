@@ -1,0 +1,314 @@
+import asyncio
+import html as html_lib
+import logging
+import secrets
+from collections import OrderedDict
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ChatAction, ParseMode
+from aiogram.filters import Command, CommandStart
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
+
+from src import handoff
+from src.bot.format import md_to_html
+from src.config import TELEGRAM_BOT_TOKEN
+from src.llm import NO_CONTEXT_MARKER, answer, generate_followups
+from src.memory import (
+    build_memory_answer,
+    build_retrieval_query,
+    get_recent_messages,
+    is_memory_question,
+    remember_message,
+)
+from src.rag.retrieve import RetrievedChunk, retrieve
+from src.settings import (
+    get_bot_name,
+    get_handoff_chat_id,
+    get_suggested_questions,
+)
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("bot")
+
+dp = Dispatcher()
+
+_followup_cache: "OrderedDict[str, str]" = OrderedDict()
+_FOLLOWUP_CACHE_MAX = 500
+
+
+def _remember_followup(question: str) -> str:
+    token = secrets.token_urlsafe(6)
+    _followup_cache[token] = question
+    while len(_followup_cache) > _FOLLOWUP_CACHE_MAX:
+        _followup_cache.popitem(last=False)
+    return token
+
+
+def _pop_followup(token: str) -> str | None:
+    return _followup_cache.pop(token, None)
+
+
+def _followups_keyboard(questions: list[str]) -> InlineKeyboardMarkup | None:
+    if not questions:
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=q, callback_data=f"fu:{_remember_followup(q)}")]
+            for q in questions
+        ]
+    )
+
+
+def _suggestions_keyboard() -> InlineKeyboardMarkup | None:
+    questions = get_suggested_questions()
+    if not questions:
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=q, callback_data=f"ask:{i}")]
+            for i, q in enumerate(questions)
+        ]
+    )
+
+
+@dp.message(CommandStart())
+async def on_start(message: Message) -> None:
+    name = get_bot_name()
+    keyboard = _suggestions_keyboard()
+    if keyboard:
+        text = (
+            f"Hi! I'm {name}, your FAQ assistant. Ask me anything about the "
+            "organization, or tap one of these to get started:"
+        )
+    else:
+        text = (
+            f"Hi! I'm {name}, your FAQ assistant. Ask me anything about the organization."
+        )
+    await message.answer(text, reply_markup=keyboard)
+
+
+@dp.message(Command("myid"))
+async def on_myid(message: Message) -> None:
+    await message.answer(
+        f"This chat's ID is: <code>{message.chat.id}</code>\n\n"
+        "If you're a staff member setting up handoff, paste this ID into the "
+        "<b>Receptionist Telegram chat ID</b> field on the portal."
+    )
+
+
+async def _keep_typing(bot: Bot, chat_id: int, stop_event: asyncio.Event) -> None:
+    """Re-send the typing action every ~4s so the indicator stays visible
+    even for slow LLM responses (Telegram's typing action expires after 5s)."""
+    while not stop_event.is_set():
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=4.0)
+            return
+        except asyncio.TimeoutError:
+            continue
+
+
+async def _forward_handoff_to_staff(
+    bot: Bot, user, text: str, handoff_id: int
+) -> bool:
+    staff_chat_id = get_handoff_chat_id()
+    if not staff_chat_id:
+        return False
+    handle = f"@{user.username}" if user and user.username else None
+    name = user.full_name if user else "(unknown)"
+    contact_line = f"{name}" + (f" ({handle})" if handle else "")
+    body = (
+        f"\U0001F198 <b>Handoff #{handoff_id}</b>\n\n"
+        f"<b>From:</b> {html_lib.escape(contact_line)}\n"
+        f"<b>Question:</b>\n<i>{html_lib.escape(text)}</i>\n\n"
+        "Reply to the user directly on Telegram. Mark resolved in the portal when done."
+    )
+    try:
+        await bot.send_message(chat_id=staff_chat_id, text=body)
+        return True
+    except Exception:
+        log.exception("Failed to forward handoff to staff chat %s", staff_chat_id)
+        return False
+
+
+async def _enrich_with_followups(
+    bot: Bot,
+    chat_id: int,
+    message_id: int,
+    user_question: str,
+    assistant_reply: str,
+    chunks: list[RetrievedChunk],
+) -> None:
+    """Generate follow-up buttons in the background and attach them to the reply."""
+    try:
+        followups = await generate_followups(user_question, assistant_reply, chunks)
+    except Exception:
+        log.exception("Failed to generate followups")
+        return
+    keyboard = _followups_keyboard(followups)
+    if not keyboard:
+        return
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=chat_id, message_id=message_id, reply_markup=keyboard
+        )
+    except Exception:
+        log.exception("Failed to attach followups keyboard")
+
+
+async def _process_question(bot: Bot, chat_id: int, user, text: str) -> None:
+    # Fire typing IMMEDIATELY so the user sees feedback within ~100ms,
+    # before any sqlite/embedding/LLM work that would otherwise delay it.
+    try:
+        await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+    except Exception:
+        pass
+
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(_keep_typing(bot, chat_id, stop_typing))
+
+    final: str | None = None
+    chunks_used: list[RetrievedChunk] = []
+    try:
+        history = get_recent_messages(chat_id)
+        if is_memory_question(text):
+            final = build_memory_answer(history)
+        else:
+            try:
+                retrieval_query = build_retrieval_query(text, history)
+                chunks = retrieve(retrieval_query)
+                reply = await answer(text, chunks, history)
+            except Exception:
+                log.exception("RAG/LLM call failed")
+                reply = None
+                chunks = []
+
+            if reply is None:
+                final = None
+            elif NO_CONTEXT_MARKER in reply:
+                handoff_id = handoff.record(
+                    question=text,
+                    user_chat_id=chat_id,
+                    user_username=user.username if user else None,
+                    user_full_name=user.full_name if user else None,
+                )
+                forwarded = await _forward_handoff_to_staff(
+                    bot, user, text, handoff_id
+                )
+                final = (
+                    "I couldn't find that in our documents, so I've passed your "
+                    "question to our team. Someone will get back to you shortly."
+                    if forwarded
+                    else "I couldn't find that in our documents. Your question has "
+                    "been logged for our team to follow up on."
+                )
+            else:
+                final = reply
+                chunks_used = chunks
+    finally:
+        stop_typing.set()
+        await typing_task
+
+    if final is None:
+        await bot.send_message(
+            chat_id, "Sorry, something went wrong. Please try again in a moment."
+        )
+        return
+
+    remember_message(chat_id, "user", text)
+    remember_message(chat_id, "assistant", final)
+    sent = await bot.send_message(chat_id, md_to_html(final))
+
+    if chunks_used:
+        asyncio.create_task(
+            _enrich_with_followups(
+                bot, chat_id, sent.message_id, text, final, chunks_used
+            )
+        )
+
+
+@dp.callback_query(F.data.startswith("ask:"))
+async def on_suggestion(callback: CallbackQuery) -> None:
+    await callback.answer()
+    try:
+        idx = int(callback.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        return
+    questions = get_suggested_questions()
+    if not 0 <= idx < len(questions):
+        return
+    question = questions[idx]
+
+    if callback.message:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await callback.message.answer(
+            f"<i>You asked:</i> {html_lib.escape(question)}"
+        )
+        chat_id = callback.message.chat.id
+        bot = callback.message.bot
+    else:
+        return
+
+    await _process_question(bot, chat_id, callback.from_user, question)
+
+
+@dp.callback_query(F.data.startswith("fu:"))
+async def on_followup(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.data or not callback.message:
+        return
+    token = callback.data.split(":", 1)[1]
+    question = _pop_followup(token)
+    if not question:
+        return
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await callback.message.answer(
+        f"<i>You asked:</i> {html_lib.escape(question)}"
+    )
+    await _process_question(
+        callback.message.bot,
+        callback.message.chat.id,
+        callback.from_user,
+        question,
+    )
+
+
+@dp.message()
+async def on_message(message: Message) -> None:
+    if not message.text:
+        await message.answer("I can only handle text messages for now.")
+        return
+    await _process_question(
+        message.bot, message.chat.id, message.from_user, message.text
+    )
+
+
+async def main() -> None:
+    if not TELEGRAM_BOT_TOKEN:
+        raise RuntimeError(
+            "TELEGRAM_BOT_TOKEN is not set. Copy .env.example to .env and fill it in."
+        )
+    bot = Bot(
+        token=TELEGRAM_BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

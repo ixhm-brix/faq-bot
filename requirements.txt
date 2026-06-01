@@ -1,0 +1,11 @@
+aiogram==3.13.1
+python-dotenv==1.0.1
+openai>=1.55.3
+pypdf>=4.0.0
+sentence-transformers>=3.0.0
+chromadb>=0.5.0
+fastapi>=0.110.0
+python-multipart>=0.0.9
+itsdangerous>=2.0.0
+jinja2>=3.1.0
+reportlab>=4.0.0
