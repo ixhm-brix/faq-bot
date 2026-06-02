@@ -7,7 +7,7 @@ from collections import OrderedDict
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatAction, ParseMode
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -16,6 +16,11 @@ from aiogram.types import (
 )
 
 from src import handoff
+from src.bot.booking import (
+    booking_start_keyboard,
+    detect_booking_intent,
+    router as booking_router,
+)
 from src.bot.format import md_to_html
 from src.config import TELEGRAM_BOT_TOKEN
 from src.llm import NO_CONTEXT_MARKER, answer, generate_followups
@@ -31,6 +36,7 @@ from src.settings import (
     get_bot_name,
     get_handoff_chat_id,
     get_suggested_questions,
+    has_module,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -65,22 +71,22 @@ def _followups_keyboard(questions: list[str]) -> InlineKeyboardMarkup | None:
     )
 
 
-def _suggestions_keyboard() -> InlineKeyboardMarkup | None:
+def _start_keyboard() -> InlineKeyboardMarkup | None:
+    rows: list[list[InlineKeyboardButton]] = []
+    if has_module("appointments"):
+        rows.append(
+            [InlineKeyboardButton(text="📅 Book an appointment", callback_data="book:start")]
+        )
     questions = get_suggested_questions()
-    if not questions:
-        return None
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=q, callback_data=f"ask:{i}")]
-            for i, q in enumerate(questions)
-        ]
-    )
+    for i, q in enumerate(questions):
+        rows.append([InlineKeyboardButton(text=q, callback_data=f"ask:{i}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
 
 @dp.message(CommandStart())
 async def on_start(message: Message) -> None:
     name = get_bot_name()
-    keyboard = _suggestions_keyboard()
+    keyboard = _start_keyboard()
     if keyboard:
         text = (
             f"Hi! I'm {name}, your FAQ assistant. Ask me anything about the "
@@ -172,6 +178,17 @@ async def _process_question(bot: Bot, chat_id: int, user, text: str) -> None:
         await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
     except Exception:
         pass
+
+    # Booking intent shortcut: if the user mentions booking/appointment
+    # and the module is enabled, offer the booking button instead of
+    # running a full RAG round-trip on a question we can't answer well.
+    if has_module("appointments") and detect_booking_intent(text):
+        await bot.send_message(
+            chat_id,
+            "Looks like you'd like to book an appointment — tap below to start:",
+            reply_markup=booking_start_keyboard(),
+        )
+        return
 
     stop_typing = asyncio.Event()
     typing_task = asyncio.create_task(_keep_typing(bot, chat_id, stop_typing))
@@ -288,7 +305,7 @@ async def on_followup(callback: CallbackQuery) -> None:
     )
 
 
-@dp.message()
+@dp.message(StateFilter(None))
 async def on_message(message: Message) -> None:
     if not message.text:
         await message.answer("I can only handle text messages for now.")
@@ -303,6 +320,7 @@ async def main() -> None:
         raise RuntimeError(
             "TELEGRAM_BOT_TOKEN is not set. Copy .env.example to .env and fill it in."
         )
+    dp.include_router(booking_router)
     bot = Bot(
         token=TELEGRAM_BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),

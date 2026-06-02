@@ -12,20 +12,27 @@ from src.config import (
     PORTAL_ADMIN_USERNAME,
     PORTAL_SESSION_SECRET,
 )
-from src import handoff
+from src import appointments, handoff
 from src.llm import generate_sample_questions
 from src.rag.ingest import ingest_pdf
 from src.rag.retrieve import RetrievedChunk
 from src.rag.store import get_collection
 from src.settings import (
+    INSTITUTION_TYPES,
+    WEEKDAYS,
     get_bot_name,
     get_handoff_chat_id,
+    get_institution_type,
     get_retrieval_threshold,
     get_suggested_questions,
+    get_working_hours,
+    has_module,
     set_bot_name,
     set_handoff_chat_id,
+    set_institution_type,
     set_retrieval_threshold,
     set_suggested_questions,
+    set_working_hours,
 )
 
 PDF_DIR = Path("data/pdfs")
@@ -151,7 +158,20 @@ async def dashboard(
             "handoff_chat_id": get_handoff_chat_id() or "",
             "retrieval_threshold": f"{get_retrieval_threshold():.2f}",
             "open_handoffs": handoff.open_count(),
+            "pending_appointments": appointments.pending_count(),
             "suggestions": get_suggested_questions(),
+            "institution_type": get_institution_type(),
+            "institution_types": [
+                (key, label) for key, (label, _) in INSTITUTION_TYPES.items()
+            ],
+            "appointments_enabled": has_module("appointments"),
+            "working_hours": get_working_hours(),
+            "weekdays": WEEKDAYS,
+            "weekday_labels": {
+                "mon": "Monday", "tue": "Tuesday", "wed": "Wednesday",
+                "thu": "Thursday", "fri": "Friday", "sat": "Saturday",
+                "sun": "Sunday",
+            },
             "message": message,
             "error": error,
         },
@@ -195,20 +215,76 @@ async def upload(request: Request, file: UploadFile = File(...)):
 
 
 @app.post("/settings")
-async def update_settings(
+async def update_settings(request: Request):
+    if not is_authed(request):
+        return RedirectResponse("/login", status_code=303)
+    form = await request.form()
+    if "bot_name" in form:
+        set_bot_name(form.get("bot_name", ""))
+    if "handoff_chat_id" in form:
+        set_handoff_chat_id(form.get("handoff_chat_id", ""))
+    if "retrieval_threshold" in form and form.get("retrieval_threshold"):
+        set_retrieval_threshold(form.get("retrieval_threshold", ""))
+    if "institution_type" in form:
+        set_institution_type(form.get("institution_type", ""))
+    if any(
+        f"{day}_open" in form or f"{day}_close" in form or f"{day}_closed" in form
+        for day in WEEKDAYS
+    ):
+        set_working_hours({k: v for k, v in form.items() if isinstance(v, str)})
+    return RedirectResponse(
+        "/dashboard?message=Settings+saved.", status_code=303
+    )
+
+
+@app.get("/appointments", response_class=HTMLResponse)
+async def appointments_view(
     request: Request,
-    bot_name: str = Form(...),
-    handoff_chat_id: str = Form(""),
-    retrieval_threshold: str = Form(""),
+    status: str = "pending",
+    message: str | None = None,
 ):
     if not is_authed(request):
         return RedirectResponse("/login", status_code=303)
-    set_bot_name(bot_name)
-    set_handoff_chat_id(handoff_chat_id)
-    if retrieval_threshold:
-        set_retrieval_threshold(retrieval_threshold)
+    if not has_module("appointments"):
+        return RedirectResponse(
+            "/dashboard?error=Appointments+module+is+disabled+for+this+institution+type.",
+            status_code=303,
+        )
+    items = appointments.list_all(status=None if status == "all" else status)
+    return templates.TemplateResponse(
+        request,
+        "appointments.html",
+        {
+            "user": request.session.get("user"),
+            "items": items,
+            "status": status,
+            "pending_count": appointments.pending_count(),
+            "appointments_enabled": True,
+            "open_handoffs": handoff.open_count(),
+            "message": message,
+        },
+    )
+
+
+@app.post("/appointments/{appointment_id}/{action}")
+async def appointments_action(
+    request: Request, appointment_id: int, action: str
+):
+    if not is_authed(request):
+        return RedirectResponse("/login", status_code=303)
+    status_map = {
+        "confirm": "confirmed",
+        "complete": "completed",
+        "cancel": "cancelled",
+        "reopen": "pending",
+    }
+    new_status = status_map.get(action)
+    if not new_status:
+        return RedirectResponse("/appointments?error=Unknown+action.", status_code=303)
+    appointments.set_status(appointment_id, new_status)
     return RedirectResponse(
-        "/dashboard?message=Settings+saved.", status_code=303
+        f"/appointments?message=Appointment+%23{appointment_id}+marked+{new_status}.",
+        status_code=303,
     )
 
 
@@ -229,6 +305,9 @@ async def inbox(
             "items": items,
             "status": status,
             "open_count": handoff.open_count(),
+            "open_handoffs": handoff.open_count(),
+            "appointments_enabled": has_module("appointments"),
+            "pending_appointments": appointments.pending_count(),
             "message": message,
         },
     )

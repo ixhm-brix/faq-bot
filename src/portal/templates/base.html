@@ -16,7 +16,18 @@
       {% if user %}
         <div class="flex items-center gap-5 text-sm">
           <a href="/dashboard" class="text-gray-700 hover:text-gray-900">Documents</a>
-          <a href="/inbox" class="text-gray-700 hover:text-gray-900">Inbox</a>
+          {% if appointments_enabled %}
+            <a href="/appointments" class="text-gray-700 hover:text-gray-900">
+              Appointments{% if pending_appointments %}
+                <span class="ml-1 inline-flex items-center justify-center bg-blue-100 text-blue-800 text-xs font-medium rounded-full px-1.5 py-0.5">{{ pending_appointments }}</span>
+              {% endif %}
+            </a>
+          {% endif %}
+          <a href="/inbox" class="text-gray-700 hover:text-gray-900">
+            Inbox{% if open_handoffs %}
+              <span class="ml-1 inline-flex items-center justify-center bg-amber-100 text-amber-800 text-xs font-medium rounded-full px-1.5 py-0.5">{{ open_handoffs }}</span>
+            {% endif %}
+          </a>
           <span class="text-gray-400">|</span>
           <span class="text-gray-500">Signed in as <span class="font-medium text-gray-800">{{ user }}</span></span>
           <a href="/logout" class="text-gray-600 hover:text-gray-900">Sign out</a>

@@ -93,3 +93,100 @@ def set_retrieval_threshold(raw: str) -> None:
     except (TypeError, ValueError):
         data["retrieval_threshold"] = DEFAULT_RETRIEVAL_THRESHOLD
     _save(data)
+
+
+# --- Institution type & per-vertical optional modules --------------------
+
+# Each option maps to: (display label, modules unlocked).
+# "appointments" unlocks the booking flow for orgs that schedule visits.
+INSTITUTION_TYPES: dict[str, tuple[str, set[str]]] = {
+    "generic": ("General organization", set()),
+    "clinic": ("Clinic / Hospital", {"appointments"}),
+    "salon": ("Salon / Spa", {"appointments"}),
+    "mechanic": ("Mechanic / Auto shop", {"appointments"}),
+    "consultant": ("Consultant / Coach", {"appointments"}),
+    "school": ("School / University", set()),
+    "event": ("Event organizer", set()),
+    "government": ("Government / Public office", set()),
+    "other": ("Other", set()),
+}
+DEFAULT_INSTITUTION_TYPE = "generic"
+
+
+def get_institution_type() -> str:
+    val = _load().get("institution_type")
+    if isinstance(val, str) and val in INSTITUTION_TYPES:
+        return val
+    return DEFAULT_INSTITUTION_TYPE
+
+
+def set_institution_type(raw: str) -> None:
+    data = _load()
+    v = (raw or "").strip().lower()
+    data["institution_type"] = v if v in INSTITUTION_TYPES else DEFAULT_INSTITUTION_TYPE
+    _save(data)
+
+
+def has_module(module: str) -> bool:
+    _, modules = INSTITUTION_TYPES[get_institution_type()]
+    return module in modules
+
+
+# --- Working hours (used by the appointments module) ---------------------
+
+# Per-weekday: either None (closed) or {"open": "HH:MM", "close": "HH:MM"}.
+# Keys are the lowercase three-letter weekday names.
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+DEFAULT_WORKING_HOURS: dict[str, dict[str, str] | None] = {
+    "mon": {"open": "08:00", "close": "18:00"},
+    "tue": {"open": "08:00", "close": "18:00"},
+    "wed": {"open": "08:00", "close": "18:00"},
+    "thu": {"open": "08:00", "close": "18:00"},
+    "fri": {"open": "08:00", "close": "18:00"},
+    "sat": {"open": "09:00", "close": "14:00"},
+    "sun": None,
+}
+
+
+def _valid_hhmm(s: str) -> bool:
+    if not isinstance(s, str) or len(s) != 5 or s[2] != ":":
+        return False
+    try:
+        h, m = int(s[:2]), int(s[3:])
+    except ValueError:
+        return False
+    return 0 <= h <= 23 and 0 <= m <= 59
+
+
+def get_working_hours() -> dict[str, dict[str, str] | None]:
+    raw = _load().get("working_hours")
+    if not isinstance(raw, dict):
+        return dict(DEFAULT_WORKING_HOURS)
+    out: dict[str, dict[str, str] | None] = {}
+    for day in WEEKDAYS:
+        v = raw.get(day)
+        if isinstance(v, dict) and _valid_hhmm(v.get("open", "")) and _valid_hhmm(v.get("close", "")):
+            out[day] = {"open": v["open"], "close": v["close"]}
+        else:
+            out[day] = None
+    return out
+
+
+def set_working_hours(form: dict[str, str]) -> None:
+    """Accept a flat form payload from the portal: e.g. {"mon_open": "08:00",
+    "mon_close": "18:00", "sun_closed": "on", ...}. Days flagged closed (or
+    with invalid times) are stored as None."""
+    data = _load()
+    hours: dict[str, dict[str, str] | None] = {}
+    for day in WEEKDAYS:
+        if form.get(f"{day}_closed"):
+            hours[day] = None
+            continue
+        o = form.get(f"{day}_open", "").strip()
+        c = form.get(f"{day}_close", "").strip()
+        if _valid_hhmm(o) and _valid_hhmm(c) and o < c:
+            hours[day] = {"open": o, "close": c}
+        else:
+            hours[day] = None
+    data["working_hours"] = hours
+    _save(data)

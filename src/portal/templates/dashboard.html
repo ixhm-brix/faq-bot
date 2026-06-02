@@ -18,6 +18,16 @@
   <p class="text-xs text-gray-500 mb-4">Changes take effect immediately — no restart needed.</p>
   <form method="post" action="/settings" class="space-y-4">
     <div>
+      <label class="block text-sm font-medium text-gray-700">Institution type</label>
+      <p class="text-xs text-gray-500 mt-0.5">Tells the assistant what kind of organization you are. Some types unlock <span class="font-medium">optional modules</span> like appointment booking (for clinics, salons, mechanics, consultants, etc.). You can change this at any time.</p>
+      <select name="institution_type"
+              class="mt-2 w-full text-sm border border-gray-300 rounded px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+        {% for key, label in institution_types %}
+          <option value="{{ key }}" {% if key == institution_type %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
       <label class="block text-sm font-medium text-gray-700">Assistant name</label>
       <p class="text-xs text-gray-500 mt-0.5">Used when users ask the bot who it is.</p>
       <input type="text" name="bot_name" value="{{ bot_name }}" required maxlength="40"
@@ -43,6 +53,40 @@
     </div>
   </form>
 </div>
+
+{% if appointments_enabled %}
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+  <h2 class="text-lg font-medium mb-1">Working hours</h2>
+  <p class="text-xs text-gray-500 mb-4">Used by the booking flow to reject impossible slots. Tick a day to mark it closed. Format is 24-hour (e.g. <code class="bg-gray-100 px-1 rounded">08:00</code>, <code class="bg-gray-100 px-1 rounded">18:00</code>).</p>
+  <form method="post" action="/settings" class="space-y-2">
+    <input type="hidden" name="bot_name" value="{{ bot_name }}">
+    <input type="hidden" name="handoff_chat_id" value="{{ handoff_chat_id }}">
+    <input type="hidden" name="retrieval_threshold" value="{{ retrieval_threshold }}">
+    <input type="hidden" name="institution_type" value="{{ institution_type }}">
+    {% for day in weekdays %}
+      {% set h = working_hours[day] %}
+      <div class="flex items-center gap-3 text-sm">
+        <div class="w-24 text-gray-700">{{ weekday_labels[day] }}</div>
+        <input type="time" name="{{ day }}_open" value="{{ h.open if h else '08:00' }}"
+               {% if not h %}disabled{% endif %}
+               class="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 {% if not h %}opacity-50{% endif %}">
+        <span class="text-gray-500">–</span>
+        <input type="time" name="{{ day }}_close" value="{{ h.close if h else '18:00' }}"
+               {% if not h %}disabled{% endif %}
+               class="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 {% if not h %}opacity-50{% endif %}">
+        <label class="ml-auto flex items-center gap-2 text-gray-600 select-none">
+          <input type="checkbox" name="{{ day }}_closed" {% if not h %}checked{% endif %}
+                 onchange="this.closest('div').querySelectorAll('input[type=time]').forEach(i => {i.disabled = this.checked; i.classList.toggle('opacity-50', this.checked);})">
+          Closed
+        </label>
+      </div>
+    {% endfor %}
+    <div class="pt-3">
+      <button class="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded text-sm font-medium transition">Save working hours</button>
+    </div>
+  </form>
+</div>
+{% endif %}
 
 <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
   <h2 class="text-lg font-medium mb-1">Upload a PDF</h2>
