@@ -192,7 +192,12 @@ async def _process_question(bot: Bot, chat_id: int, user, text: str) -> None:
     chunks_used: list[RetrievedChunk] = []
     try:
         result = await chat.answer_message(str(chat_id), text)
-        if result.is_handoff:
+        if result.is_off_topic:
+            # Off-topic questions don't get handed to staff — that would
+            # waste their time. Polite decline only.
+            final = chat.build_off_topic_reply()
+            remember_message(chat_id, "assistant", final)
+        elif result.is_handoff:
             handoff_id = handoff.record(
                 question=text,
                 user_chat_id=chat_id,

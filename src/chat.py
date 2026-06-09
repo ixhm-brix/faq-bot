@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from src.llm import NO_CONTEXT_MARKER, answer
+from src.llm import NO_CONTEXT_MARKER, OFF_TOPIC_MARKER, answer
 from src.memory import (
     build_memory_answer,
     build_retrieval_query,
@@ -23,19 +23,26 @@ from src.memory import (
     remember_message,
 )
 from src.rag.retrieve import RetrievedChunk, retrieve
+from src.settings import get_suggested_questions
 
 
 @dataclass
 class AnswerResult:
     text: str
     """Raw text reply for grounded answers / memory recall. Empty when
-    is_handoff is True — the channel adapter writes its own phrasing
-    (e.g. 'I've forwarded your question to our team')."""
+    is_handoff or is_off_topic is True — the channel adapter writes its
+    own phrasing in those cases."""
 
     is_handoff: bool = False
-    """True when the LLM declined to answer from the docs. Caller should
-    record the question with src.handoff.record() and show a handoff
-    message in the channel's UI."""
+    """True when the LLM declined to answer because the docs don't cover
+    a *legitimate* question for this org. Caller should record the
+    question with src.handoff.record() and show a handoff message."""
+
+    is_off_topic: bool = False
+    """True when the LLM declined because the question is clearly not
+    about this organization at all (e.g. 'what's the HTML tag for an
+    image?'). Caller should politely decline WITHOUT escalating to
+    staff — nobody at the org should be answering those."""
 
     chunks_used: list[RetrievedChunk] = field(default_factory=list)
     """The chunks that grounded the answer. Caller may pass these to
@@ -64,8 +71,30 @@ async def answer_message(session_id: str, text: str) -> AnswerResult:
 
     remember_message(session_id, "user", text)
 
+    # Order matters: OFF_TOPIC takes precedence over NO_ANSWER_IN_DOCS so a
+    # model that emits both still routes to the polite decline.
+    if OFF_TOPIC_MARKER in llm_reply:
+        return AnswerResult(text="", is_off_topic=True, chunks_used=[])
     if NO_CONTEXT_MARKER in llm_reply:
         return AnswerResult(text="", is_handoff=True, chunks_used=[])
 
     remember_message(session_id, "assistant", llm_reply)
     return AnswerResult(text=llm_reply, chunks_used=chunks)
+
+
+def build_off_topic_reply() -> str:
+    """Polite decline for questions that aren't about this organization.
+
+    Doesn't escalate — these aren't questions staff should be paged on.
+    Surfaces a couple of the configured suggestion questions as
+    examples of what *is* in scope.
+    """
+    suggestions = get_suggested_questions()
+    base = (
+        "I'm here to answer questions about our organization, so I can't help "
+        "with that one."
+    )
+    if suggestions:
+        examples = "\n".join(f"- {q}" for q in suggestions[:3])
+        return f"{base} You could try asking me things like:\n\n{examples}"
+    return f"{base} Try asking me about something we offer or do."

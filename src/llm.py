@@ -8,6 +8,7 @@ from src.settings import get_bot_name
 _client: AsyncOpenAI | None = None
 
 NO_CONTEXT_MARKER = "NO_ANSWER_IN_DOCS"
+OFF_TOPIC_MARKER = "OFF_TOPIC"
 
 _SYSTEM_PROMPT_TEMPLATE = """Your name is {bot_name}. You are an FAQ assistant for a specific organization. Be genuinely helpful and feel like a real assistant, not a search engine.
 
@@ -34,13 +35,20 @@ Conversation continuity rule: Treat each message as part of the same 12-hour cha
    - Invent organization-specific facts not in the context (no made-up tuition figures, names, phone numbers, dates, or policies).
    - Refuse to answer just because the question isn't phrased exactly like an entry in the docs — combine what's there.
 
-5. If the topic is genuinely not covered in the context at all (e.g. wifi password when the docs say nothing about wifi), reply with EXACTLY this token on its own line and nothing else: {marker}"""
+5. If the user asks a substantive question NOT covered in the context, decide which of these two cases applies and reply with EXACTLY one token on its own line and nothing else:
+
+   - {marker} → use this when the question is plausibly something a user of THIS organization would ask, but the documents don't cover it. Examples: asking about a service the org might offer, a policy, hours of a sub-location, a price not listed, contact details we don't have, etc. The team will follow up.
+
+   - {off_topic} → use this when the question is clearly not about this organization at all and a receptionist would have no business answering it. Examples: programming or technical help (HTML, Python, formulas), general knowledge / trivia, weather, jokes, math problems, asking about a different unrelated company, anything a search engine would handle. Do not waste the team's time on these — emit {off_topic} so the bot can politely decline.
+
+When in doubt between the two, prefer {marker} (be generous about treating things as in-scope rather than off-topic)."""
 
 
 def _system_prompt() -> str:
     return _SYSTEM_PROMPT_TEMPLATE.format(
         bot_name=get_bot_name(),
         marker=NO_CONTEXT_MARKER,
+        off_topic=OFF_TOPIC_MARKER,
     )
 
 

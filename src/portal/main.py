@@ -494,6 +494,13 @@ async def widget_chat(payload: WidgetMessage):
             {"reply": "Sorry, something went wrong on our side. Please try again."}
         )
 
+    from src.memory import remember_message
+
+    if result.is_off_topic:
+        reply_text = chat.build_off_topic_reply()
+        remember_message(full_session_id, "assistant", reply_text)
+        return JSONResponse({"reply": reply_text})
+
     if result.is_handoff:
         handoff.record(
             question=text,
@@ -506,7 +513,6 @@ async def widget_chat(payload: WidgetMessage):
             "for our team to follow up. If you'd like a quicker answer, please "
             "leave us your email or contact us directly."
         )
-        from src.memory import remember_message
         remember_message(full_session_id, "assistant", reply_text)
         return JSONResponse({"reply": reply_text})
 
