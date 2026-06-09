@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Widget demo — FAQ Bot</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 760px; margin: 60px auto; padding: 0 24px; color: #111827; line-height: 1.55; }
+    h1 { font-size: 28px; margin: 0 0 8px; letter-spacing: -.01em; }
+    .lede { color: #6b7280; margin: 0 0 32px; }
+    .card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px 24px; margin: 24px 0; }
+    pre { background: #111827; color: #f9fafb; padding: 14px 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
+    code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    p code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 90%; }
+    ol li { margin: 6px 0; }
+    .hint { color: #6b7280; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>FAQ Bot — widget demo</h1>
+  <p class="lede">This page is a fake "organization website." The chat button you see in the bottom-right corner is the embeddable widget. It talks to the same bot you've been using on Telegram, with conversation memory keyed by your browser, not by your Telegram account.</p>
+
+  <div class="card">
+    <strong>To embed on a real site</strong>, the org just pastes this one line, anywhere on the page:
+    <pre><code>&lt;script src="http://127.0.0.1:8000/widget.js" async&gt;&lt;/script&gt;</code></pre>
+    <p class="hint">Replace <code>127.0.0.1:8000</code> with whatever domain you host the portal on.</p>
+  </div>
+
+  <p>Try asking it something your uploaded PDFs cover — for example:</p>
+  <ol>
+    <li>"What are your opening hours?"</li>
+    <li>"Where are you located?"</li>
+    <li>"Do you accept insurance?"</li>
+    <li>Something that's <em>not</em> in your docs — to see the handoff behaviour.</li>
+  </ol>
+
+  <p class="hint">The widget keeps a 12-hour conversation memory just like the Telegram bot, so follow-up questions like "what about Saturday?" still work.</p>
+
+  <script src="/widget.js" async></script>
+</body>
+</html>

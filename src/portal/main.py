@@ -3,8 +3,10 @@ import shutil
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from src.config import (
@@ -12,7 +14,7 @@ from src.config import (
     PORTAL_ADMIN_USERNAME,
     PORTAL_SESSION_SECRET,
 )
-from src import appointments, auth, handoff
+from src import appointments, auth, chat, handoff
 from src.llm import generate_sample_questions
 from src.rag.ingest import ingest_pdf
 from src.rag.retrieve import RetrievedChunk
@@ -41,12 +43,24 @@ from src.settings import (
 
 PDF_DIR = Path("data/pdfs")
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).parent / "static"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("portal")
 
 app = FastAPI(title="FAQ Bot Portal")
 app.add_middleware(SessionMiddleware, secret_key=PORTAL_SESSION_SECRET)
+
+# The website widget is embedded on third-party origins, so the /widget/*
+# endpoints need CORS. Wide-open for the MVP; tighten to per-org allow-list
+# when multi-tenancy lands.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+    max_age=86400,
+)
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
@@ -420,6 +434,83 @@ async def resolve_handoff(request: Request, handoff_id: int):
         f"/inbox?message=Handoff+%23{handoff_id}+marked+resolved.",
         status_code=303,
     )
+
+
+# --- Website widget (public, embeddable) ----------------------------------
+
+class WidgetMessage(BaseModel):
+    session_id: str
+    text: str
+
+
+@app.get("/widget.js")
+async def widget_js():
+    """Embeddable JavaScript that injects the floating chat button."""
+    return FileResponse(
+        STATIC_DIR / "widget.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/widget/demo", response_class=HTMLResponse)
+async def widget_demo():
+    """A sample 'organization website' page with the widget embedded, so
+    we can demo the experience without putting it on a real customer site."""
+    return FileResponse(STATIC_DIR / "widget-demo.html", media_type="text/html")
+
+
+@app.get("/widget/config")
+async def widget_config():
+    """Public configuration the widget needs at load time."""
+    name = get_bot_name()
+    return JSONResponse(
+        {
+            "bot_name": name,
+            "greeting": f"Hi! I'm {name}. How can I help?",
+        }
+    )
+
+
+@app.post("/widget/chat")
+async def widget_chat(payload: WidgetMessage):
+    """Process one message from a website visitor and return the bot's reply."""
+    text = (payload.text or "").strip()
+    session_id = (payload.session_id or "").strip()
+    if not session_id or not text:
+        return JSONResponse(
+            {"reply": "Please send a non-empty message."}, status_code=400
+        )
+
+    # Prefix the session id so it can't collide with Telegram chat_ids in
+    # the shared conversation_memory table.
+    full_session_id = f"web:{session_id[:64]}"
+
+    try:
+        result = await chat.answer_message(full_session_id, text)
+    except Exception:
+        log.exception("widget_chat failed")
+        return JSONResponse(
+            {"reply": "Sorry, something went wrong on our side. Please try again."}
+        )
+
+    if result.is_handoff:
+        handoff.record(
+            question=text,
+            user_chat_id=0,
+            user_username=None,
+            user_full_name=f"Web visitor ({session_id[:8]})",
+        )
+        reply_text = (
+            "I couldn't find that in our documents, so I've logged your question "
+            "for our team to follow up. If you'd like a quicker answer, please "
+            "leave us your email or contact us directly."
+        )
+        from src.memory import remember_message
+        remember_message(full_session_id, "assistant", reply_text)
+        return JSONResponse({"reply": reply_text})
+
+    return JSONResponse({"reply": result.text})
 
 
 @app.post("/delete")

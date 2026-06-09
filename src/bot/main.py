@@ -15,7 +15,7 @@ from aiogram.types import (
     Message,
 )
 
-from src import handoff
+from src import chat, handoff
 from src.bot.booking import (
     booking_start_keyboard,
     detect_booking_intent,
@@ -23,15 +23,9 @@ from src.bot.booking import (
 )
 from src.bot.format import md_to_html
 from src.config import TELEGRAM_BOT_TOKEN
-from src.llm import NO_CONTEXT_MARKER, answer, generate_followups
-from src.memory import (
-    build_memory_answer,
-    build_retrieval_query,
-    get_recent_messages,
-    is_memory_question,
-    remember_message,
-)
-from src.rag.retrieve import RetrievedChunk, retrieve
+from src.llm import generate_followups
+from src.memory import remember_message
+from src.rag.retrieve import RetrievedChunk
 from src.settings import (
     get_bot_name,
     get_handoff_chat_id,
@@ -197,41 +191,33 @@ async def _process_question(bot: Bot, chat_id: int, user, text: str) -> None:
     final: str | None = None
     chunks_used: list[RetrievedChunk] = []
     try:
-        history = get_recent_messages(chat_id)
-        if is_memory_question(text):
-            final = build_memory_answer(history)
+        result = await chat.answer_message(str(chat_id), text)
+        if result.is_handoff:
+            handoff_id = handoff.record(
+                question=text,
+                user_chat_id=chat_id,
+                user_username=user.username if user else None,
+                user_full_name=user.full_name if user else None,
+            )
+            forwarded = await _forward_handoff_to_staff(
+                bot, user, text, handoff_id
+            )
+            final = (
+                "I couldn't find that in our documents, so I've passed your "
+                "question to our team. Someone will get back to you shortly."
+                if forwarded
+                else "I couldn't find that in our documents. Your question has "
+                "been logged for our team to follow up on."
+            )
+            # Channel-specific handoff phrasing — store it as the assistant
+            # turn so the next message has accurate context.
+            remember_message(chat_id, "assistant", final)
         else:
-            try:
-                retrieval_query = build_retrieval_query(text, history)
-                chunks = retrieve(retrieval_query)
-                reply = await answer(text, chunks, history)
-            except Exception:
-                log.exception("RAG/LLM call failed")
-                reply = None
-                chunks = []
-
-            if reply is None:
-                final = None
-            elif NO_CONTEXT_MARKER in reply:
-                handoff_id = handoff.record(
-                    question=text,
-                    user_chat_id=chat_id,
-                    user_username=user.username if user else None,
-                    user_full_name=user.full_name if user else None,
-                )
-                forwarded = await _forward_handoff_to_staff(
-                    bot, user, text, handoff_id
-                )
-                final = (
-                    "I couldn't find that in our documents, so I've passed your "
-                    "question to our team. Someone will get back to you shortly."
-                    if forwarded
-                    else "I couldn't find that in our documents. Your question has "
-                    "been logged for our team to follow up on."
-                )
-            else:
-                final = reply
-                chunks_used = chunks
+            final = result.text
+            chunks_used = result.chunks_used
+    except Exception:
+        log.exception("RAG/LLM call failed")
+        final = None
     finally:
         stop_typing.set()
         await typing_task
@@ -242,8 +228,6 @@ async def _process_question(bot: Bot, chat_id: int, user, text: str) -> None:
         )
         return
 
-    remember_message(chat_id, "user", text)
-    remember_message(chat_id, "assistant", final)
     sent = await bot.send_message(chat_id, md_to_html(final))
 
     if chunks_used:
