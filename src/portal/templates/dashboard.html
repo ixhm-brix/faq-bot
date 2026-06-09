@@ -35,6 +35,13 @@
              class="mt-2 w-full text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
     </div>
     <div>
+      <label class="block text-sm font-medium text-gray-700">Telegram bot token</label>
+      <p class="text-xs text-gray-500 mt-0.5">From <a class="text-blue-600 hover:underline" href="https://t.me/BotFather" target="_blank">@BotFather</a> — overrides the <code class="bg-gray-100 px-1 rounded">TELEGRAM_BOT_TOKEN</code> in <code class="bg-gray-100 px-1 rounded">.env</code>. <span class="font-medium">Restart the bot</span> after changing this for it to take effect.</p>
+      <input type="text" name="telegram_bot_token" value="{{ telegram_bot_token }}" maxlength="80"
+             placeholder="1234567890:ABCDEF…"
+             class="mt-2 w-full text-sm font-mono border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+    </div>
+    <div>
       <label class="block text-sm font-medium text-gray-700">Receptionist Telegram chat ID</label>
       <p class="text-xs text-gray-500 mt-0.5">When the bot can't answer, the question is forwarded here. Leave empty to only log questions to the inbox. To find your chat ID: start a chat with the bot and send <code class="bg-gray-100 px-1 rounded">/myid</code>{% if open_handoffs %} · <a href="/inbox" class="text-blue-600 hover:underline">{{ open_handoffs }} open handoff{{ '' if open_handoffs == 1 else 's' }}</a>{% endif %}.</p>
       <input type="text" name="handoff_chat_id" value="{{ handoff_chat_id }}" maxlength="20"

@@ -36,6 +36,7 @@ from src.settings import (
     get_bot_name,
     get_handoff_chat_id,
     get_suggested_questions,
+    get_telegram_bot_token,
     has_module,
 )
 
@@ -316,13 +317,17 @@ async def on_message(message: Message) -> None:
 
 
 async def main() -> None:
-    if not TELEGRAM_BOT_TOKEN:
+    # Prefer the token set through the portal; fall back to the legacy .env
+    # value so existing deployments keep working without a config migration.
+    token = get_telegram_bot_token() or TELEGRAM_BOT_TOKEN
+    if not token:
         raise RuntimeError(
-            "TELEGRAM_BOT_TOKEN is not set. Copy .env.example to .env and fill it in."
+            "Telegram bot token is not configured. Set it in the portal "
+            "(Settings → Telegram bot token) or in TELEGRAM_BOT_TOKEN in .env."
         )
     dp.include_router(booking_router)
     bot = Bot(
-        token=TELEGRAM_BOT_TOKEN,
+        token=token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     await dp.start_polling(bot)

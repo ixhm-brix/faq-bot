@@ -19,6 +19,45 @@ def _save(data: dict) -> None:
     SETTINGS_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def get_telegram_bot_token() -> str:
+    val = _load().get("telegram_bot_token", "")
+    return val.strip() if isinstance(val, str) else ""
+
+
+def set_telegram_bot_token(raw: str) -> None:
+    data = _load()
+    data["telegram_bot_token"] = (raw or "").strip()
+    _save(data)
+
+
+def is_setup_complete() -> bool:
+    return bool(_load().get("setup_complete", False))
+
+
+def mark_setup_complete() -> None:
+    data = _load()
+    data["setup_complete"] = True
+    _save(data)
+
+
+def auto_mark_setup_if_existing() -> None:
+    """Treat a settings.json that already has user configuration as a completed
+    setup, so existing deployments aren't bounced to the wizard after upgrade."""
+    data = _load()
+    if data.get("setup_complete"):
+        return
+    has_state = bool(
+        data.get("bot_name")
+        or data.get("institution_type")
+        or data.get("handoff_chat_id")
+        or data.get("suggested_questions")
+        or data.get("telegram_bot_token")
+    )
+    if has_state:
+        data["setup_complete"] = True
+        _save(data)
+
+
 def get_bot_name() -> str:
     name = _load().get("bot_name", "").strip()
     return name or DEFAULT_BOT_NAME

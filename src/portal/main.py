@@ -12,7 +12,7 @@ from src.config import (
     PORTAL_ADMIN_USERNAME,
     PORTAL_SESSION_SECRET,
 )
-from src import appointments, handoff
+from src import appointments, auth, handoff
 from src.llm import generate_sample_questions
 from src.rag.ingest import ingest_pdf
 from src.rag.retrieve import RetrievedChunk
@@ -25,13 +25,17 @@ from src.settings import (
     get_institution_type,
     get_retrieval_threshold,
     get_suggested_questions,
+    get_telegram_bot_token,
     get_working_hours,
     has_module,
+    is_setup_complete,
+    mark_setup_complete,
     set_bot_name,
     set_handoff_chat_id,
     set_institution_type,
     set_retrieval_threshold,
     set_suggested_questions,
+    set_telegram_bot_token,
     set_working_hours,
 )
 
@@ -41,15 +45,19 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("portal")
 
-if not PORTAL_ADMIN_PASSWORD:
-    raise RuntimeError(
-        "PORTAL_ADMIN_PASSWORD is not set. Set it in .env before starting the portal."
-    )
-
 app = FastAPI(title="FAQ Bot Portal")
 app.add_middleware(SessionMiddleware, secret_key=PORTAL_SESSION_SECRET)
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+# Seed the initial admin from legacy env credentials so existing deployments
+# keep working. Fresh installs without env creds will see the /signup screen.
+auth.bootstrap_admin(PORTAL_ADMIN_USERNAME, PORTAL_ADMIN_PASSWORD)
+
+# Existing deployments already have bot_name / institution_type / etc. in
+# settings.json — don't bounce those admins to the /setup wizard on upgrade.
+from src.settings import auto_mark_setup_if_existing  # noqa: E402
+auto_mark_setup_if_existing()
 
 
 def is_authed(request: Request) -> bool:
@@ -104,14 +112,19 @@ async def refresh_suggestions() -> list[str]:
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    target = "/dashboard" if is_authed(request) else "/login"
-    return RedirectResponse(target, status_code=303)
+    if is_authed(request):
+        return RedirectResponse("/dashboard", status_code=303)
+    if auth.user_count() == 0:
+        return RedirectResponse("/signup", status_code=303)
+    return RedirectResponse("/login", status_code=303)
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_form(request: Request):
     if is_authed(request):
         return RedirectResponse("/dashboard", status_code=303)
+    if auth.user_count() == 0:
+        return RedirectResponse("/signup", status_code=303)
     return templates.TemplateResponse(
         request, "login.html", {"user": None, "error": None}
     )
@@ -123,9 +136,10 @@ async def login_submit(
     username: str = Form(...),
     password: str = Form(...),
 ):
-    if username == PORTAL_ADMIN_USERNAME and password == PORTAL_ADMIN_PASSWORD:
-        request.session["user"] = username
-        return RedirectResponse("/dashboard", status_code=303)
+    if auth.verify_password(username, password):
+        request.session["user"] = username.strip().lower()
+        target = "/dashboard" if is_setup_complete() else "/setup"
+        return RedirectResponse(target, status_code=303)
     return templates.TemplateResponse(
         request,
         "login.html",
@@ -140,6 +154,85 @@ async def logout(request: Request):
     return RedirectResponse("/login", status_code=303)
 
 
+@app.get("/signup", response_class=HTMLResponse)
+async def signup_form(request: Request):
+    if auth.user_count() > 0:
+        return RedirectResponse("/login", status_code=303)
+    return templates.TemplateResponse(
+        request, "signup.html", {"user": None, "error": None}
+    )
+
+
+@app.post("/signup")
+async def signup_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    password_confirm: str = Form(...),
+):
+    if auth.user_count() > 0:
+        return RedirectResponse("/login", status_code=303)
+    if password != password_confirm:
+        return templates.TemplateResponse(
+            request, "signup.html",
+            {"user": None, "error": "Passwords don't match."},
+            status_code=400,
+        )
+    try:
+        auth.create_user(username, password)
+    except ValueError as e:
+        return templates.TemplateResponse(
+            request, "signup.html",
+            {"user": None, "error": str(e)},
+            status_code=400,
+        )
+    request.session["user"] = username.strip().lower()
+    return RedirectResponse("/setup", status_code=303)
+
+
+@app.get("/setup", response_class=HTMLResponse)
+async def setup_form(request: Request):
+    if not is_authed(request):
+        return RedirectResponse("/login", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "setup.html",
+        {
+            "user": request.session.get("user"),
+            "institution_type": get_institution_type(),
+            "institution_types": [
+                (key, label) for key, (label, _) in INSTITUTION_TYPES.items()
+            ],
+            "telegram_bot_token": get_telegram_bot_token(),
+            "bot_name": get_bot_name(),
+            "handoff_chat_id": get_handoff_chat_id() or "",
+            "setup_complete": is_setup_complete(),
+        },
+    )
+
+
+@app.post("/setup")
+async def setup_submit(
+    request: Request,
+    institution_type: str = Form(...),
+    telegram_bot_token: str = Form(""),
+    bot_name: str = Form(...),
+    handoff_chat_id: str = Form(""),
+):
+    if not is_authed(request):
+        return RedirectResponse("/login", status_code=303)
+    set_institution_type(institution_type)
+    if telegram_bot_token.strip():
+        set_telegram_bot_token(telegram_bot_token)
+    set_bot_name(bot_name)
+    set_handoff_chat_id(handoff_chat_id)
+    mark_setup_complete()
+    return RedirectResponse(
+        "/dashboard?message=Setup+saved.+Next+step%3A+upload+a+PDF.",
+        status_code=303,
+    )
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
@@ -148,6 +241,8 @@ async def dashboard(
 ):
     if not is_authed(request):
         return RedirectResponse("/login", status_code=303)
+    if not is_setup_complete():
+        return RedirectResponse("/setup", status_code=303)
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -155,6 +250,7 @@ async def dashboard(
             "user": request.session.get("user"),
             "documents": list_documents(),
             "bot_name": get_bot_name(),
+            "telegram_bot_token": get_telegram_bot_token(),
             "handoff_chat_id": get_handoff_chat_id() or "",
             "retrieval_threshold": f"{get_retrieval_threshold():.2f}",
             "open_handoffs": handoff.open_count(),
@@ -227,6 +323,8 @@ async def update_settings(request: Request):
         set_retrieval_threshold(form.get("retrieval_threshold", ""))
     if "institution_type" in form:
         set_institution_type(form.get("institution_type", ""))
+    if "telegram_bot_token" in form:
+        set_telegram_bot_token(form.get("telegram_bot_token", ""))
     if any(
         f"{day}_open" in form or f"{day}_close" in form or f"{day}_closed" in form
         for day in WEEKDAYS

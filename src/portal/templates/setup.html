@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Setup — FAQ Bot Portal{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto">
+  <div class="mb-6">
+    <h1 class="text-2xl font-semibold tracking-tight">Set up your assistant</h1>
+    <p class="text-sm text-gray-500 mt-1">A few quick steps and your bot is ready. You can change any of this later.</p>
+  </div>
+
+  <form method="post" action="/setup" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-6">
+    <div>
+      <div class="flex items-center gap-2 mb-1">
+        <span class="flex items-center justify-center w-6 h-6 bg-blue-600 text-white rounded-full text-xs font-medium">1</span>
+        <label class="text-sm font-medium text-gray-900">What kind of organization are you?</label>
+      </div>
+      <p class="text-xs text-gray-500 mb-2 ml-8">Some types unlock optional modules like appointment booking. You can change this any time.</p>
+      <select name="institution_type" required
+              class="ml-8 w-[calc(100%-2rem)] text-sm border border-gray-300 rounded px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+        {% for key, label in institution_types %}
+          <option value="{{ key }}" {% if key == institution_type %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div>
+      <div class="flex items-center gap-2 mb-1">
+        <span class="flex items-center justify-center w-6 h-6 bg-blue-600 text-white rounded-full text-xs font-medium">2</span>
+        <label class="text-sm font-medium text-gray-900">Telegram bot token</label>
+      </div>
+      <p class="text-xs text-gray-500 mb-2 ml-8">
+        Open Telegram, message <a class="text-blue-600 hover:underline" href="https://t.me/BotFather" target="_blank">@BotFather</a>,
+        send <code class="bg-gray-100 px-1 rounded">/newbot</code>, follow the prompts, and paste the token it gives you.
+        Looks like <code class="bg-gray-100 px-1 rounded">1234567890:ABC-DEF…</code>.
+      </p>
+      <input type="text" name="telegram_bot_token" value="{{ telegram_bot_token }}" maxlength="80"
+             placeholder="1234567890:ABCDEF…"
+             class="ml-8 w-[calc(100%-2rem)] text-sm font-mono border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+      <p class="text-xs text-gray-500 mt-1 ml-8">If you already have a token in your <code class="bg-gray-100 px-1 rounded">.env</code> file you can leave this empty — the portal value takes priority.</p>
+    </div>
+
+    <div>
+      <div class="flex items-center gap-2 mb-1">
+        <span class="flex items-center justify-center w-6 h-6 bg-blue-600 text-white rounded-full text-xs font-medium">3</span>
+        <label class="text-sm font-medium text-gray-900">Name your assistant</label>
+      </div>
+      <p class="text-xs text-gray-500 mb-2 ml-8">What should the bot call itself when users ask?</p>
+      <input type="text" name="bot_name" value="{{ bot_name }}" required maxlength="40"
+             placeholder="e.g. Acme Helper"
+             class="ml-8 w-[calc(100%-2rem)] text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+    </div>
+
+    <div>
+      <div class="flex items-center gap-2 mb-1">
+        <span class="flex items-center justify-center w-6 h-6 bg-blue-600 text-white rounded-full text-xs font-medium">4</span>
+        <label class="text-sm font-medium text-gray-900">Where should the bot send questions it can't answer?</label>
+        <span class="text-xs text-gray-500">(optional)</span>
+      </div>
+      <p class="text-xs text-gray-500 mb-2 ml-8">
+        Open a chat with your bot on Telegram and send <code class="bg-gray-100 px-1 rounded">/myid</code> — it'll reply with a number. Paste it here.
+        Leave empty for now if you don't have it; we'll just log questions to the inbox.
+      </p>
+      <input type="text" name="handoff_chat_id" value="{{ handoff_chat_id }}" maxlength="20"
+             placeholder="e.g. 123456789"
+             class="ml-8 w-[calc(100%-2rem)] text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+    </div>
+
+    <div class="pt-2 flex items-center justify-between">
+      <p class="text-xs text-gray-500">After this you'll upload your first PDF and the bot will start answering.</p>
+      <button class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded text-sm font-medium transition">Finish setup</button>
+    </div>
+  </form>
+
+  {% if setup_complete %}
+    <p class="mt-4 text-center text-xs text-gray-500"><a href="/dashboard" class="text-blue-600 hover:underline">Back to dashboard</a></p>
+  {% endif %}
+</div>
+{% endblock %}
