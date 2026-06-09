@@ -134,6 +134,45 @@ def set_retrieval_threshold(raw: str) -> None:
     _save(data)
 
 
+# --- WhatsApp channel (via Twilio for now) -------------------------------
+
+def get_whatsapp_account_sid() -> str:
+    val = _load().get("whatsapp_account_sid", "")
+    return val.strip() if isinstance(val, str) else ""
+
+
+def get_whatsapp_auth_token() -> str:
+    val = _load().get("whatsapp_auth_token", "")
+    return val.strip() if isinstance(val, str) else ""
+
+
+def get_whatsapp_from_number() -> str:
+    """The Twilio WhatsApp 'from' number, e.g. 'whatsapp:+14155238886'
+    for the sandbox or your own WA-enabled Twilio number."""
+    val = _load().get("whatsapp_from_number", "")
+    return val.strip() if isinstance(val, str) else ""
+
+
+def whatsapp_configured() -> bool:
+    return all(
+        [get_whatsapp_account_sid(), get_whatsapp_auth_token(), get_whatsapp_from_number()]
+    )
+
+
+def set_whatsapp_settings(account_sid: str, auth_token: str, from_number: str) -> None:
+    data = _load()
+    data["whatsapp_account_sid"] = (account_sid or "").strip()
+    if auth_token and auth_token.strip():
+        # Empty submit means "leave it alone" so admins don't have to
+        # re-paste the secret every time they tweak another field.
+        data["whatsapp_auth_token"] = auth_token.strip()
+    from_number = (from_number or "").strip()
+    if from_number and not from_number.startswith("whatsapp:"):
+        from_number = f"whatsapp:{from_number}"
+    data["whatsapp_from_number"] = from_number
+    _save(data)
+
+
 # --- Institution type & per-vertical optional modules --------------------
 
 # Each option maps to: (display label, modules unlocked).

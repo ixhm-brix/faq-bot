@@ -14,7 +14,7 @@ from src.config import (
     PORTAL_ADMIN_USERNAME,
     PORTAL_SESSION_SECRET,
 )
-from src import appointments, auth, chat, handoff
+from src import appointments, auth, chat, handoff, whatsapp
 from src.llm import generate_sample_questions
 from src.rag.ingest import ingest_pdf
 from src.rag.retrieve import RetrievedChunk
@@ -28,6 +28,8 @@ from src.settings import (
     get_retrieval_threshold,
     get_suggested_questions,
     get_telegram_bot_token,
+    get_whatsapp_account_sid,
+    get_whatsapp_from_number,
     get_working_hours,
     has_module,
     is_setup_complete,
@@ -38,7 +40,9 @@ from src.settings import (
     set_retrieval_threshold,
     set_suggested_questions,
     set_telegram_bot_token,
+    set_whatsapp_settings,
     set_working_hours,
+    whatsapp_configured,
 )
 
 PDF_DIR = Path("data/pdfs")
@@ -265,6 +269,9 @@ async def dashboard(
             "documents": list_documents(),
             "bot_name": get_bot_name(),
             "telegram_bot_token": get_telegram_bot_token(),
+            "whatsapp_account_sid": get_whatsapp_account_sid(),
+            "whatsapp_from_number": get_whatsapp_from_number(),
+            "whatsapp_configured": whatsapp_configured(),
             "handoff_chat_id": get_handoff_chat_id() or "",
             "retrieval_threshold": f"{get_retrieval_threshold():.2f}",
             "open_handoffs": handoff.open_count(),
@@ -339,6 +346,14 @@ async def update_settings(request: Request):
         set_institution_type(form.get("institution_type", ""))
     if "telegram_bot_token" in form:
         set_telegram_bot_token(form.get("telegram_bot_token", ""))
+    if any(
+        k in form for k in ("whatsapp_account_sid", "whatsapp_auth_token", "whatsapp_from_number")
+    ):
+        set_whatsapp_settings(
+            form.get("whatsapp_account_sid", ""),
+            form.get("whatsapp_auth_token", ""),
+            form.get("whatsapp_from_number", ""),
+        )
     if any(
         f"{day}_open" in form or f"{day}_close" in form or f"{day}_closed" in form
         for day in WEEKDAYS
@@ -434,6 +449,63 @@ async def resolve_handoff(request: Request, handoff_id: int):
         f"/inbox?message=Handoff+%23{handoff_id}+marked+resolved.",
         status_code=303,
     )
+
+
+# --- WhatsApp webhook (public, Twilio calls into it) ---------------------
+
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(request: Request):
+    """Twilio WhatsApp webhook. Twilio sends application/x-www-form-urlencoded
+    on every incoming message and expects a quick 200 — we reply
+    asynchronously over the REST API rather than via TwiML so the bot can
+    take its time."""
+    form = await request.form()
+    inbound = whatsapp.parse_twilio_inbound(dict(form))
+    if inbound is None:
+        # Status callbacks, media-only, weird payloads — acknowledge and drop.
+        return JSONResponse({"status": "ignored"})
+
+    try:
+        result = await chat.answer_message(inbound.session_id, inbound.text)
+    except Exception:
+        log.exception("WhatsApp chat.answer_message failed")
+        try:
+            await whatsapp.send_message(
+                inbound.from_number,
+                "Sorry, something went wrong on our side. Please try again in a moment.",
+            )
+        except Exception:
+            log.exception("Failed to send WhatsApp error reply")
+        return JSONResponse({"status": "error"}, status_code=200)
+
+    from src.memory import remember_message
+
+    if result.is_off_topic:
+        reply_text = chat.build_off_topic_reply()
+        remember_message(inbound.session_id, "assistant", reply_text)
+    elif result.is_handoff:
+        handoff.record(
+            question=inbound.text,
+            user_chat_id=0,
+            user_username=None,
+            user_full_name=f"WhatsApp: {inbound.profile_name or inbound.from_number}",
+        )
+        reply_text = (
+            "I couldn't find that in our documents, so I've logged your question "
+            "for our team to follow up."
+        )
+        remember_message(inbound.session_id, "assistant", reply_text)
+    else:
+        reply_text = result.text
+
+    try:
+        await whatsapp.send_message(inbound.from_number, reply_text)
+    except RuntimeError as e:
+        log.error("WhatsApp not configured: %s", e)
+    except Exception:
+        log.exception("Failed to send WhatsApp reply")
+
+    return JSONResponse({"status": "ok"})
 
 
 # --- Website widget (public, embeddable) ----------------------------------

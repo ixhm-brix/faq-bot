@@ -61,6 +61,50 @@
   </form>
 </div>
 
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+  <div class="flex items-start justify-between mb-1 gap-4">
+    <div>
+      <h2 class="text-lg font-medium">WhatsApp channel (via Twilio)</h2>
+      <p class="text-xs text-gray-500 mt-0.5">
+        Lets users chat with the bot on WhatsApp. Paste the three values from your Twilio console below, then point Twilio's WhatsApp webhook at <code class="bg-gray-100 px-1 rounded">/whatsapp/webhook</code> on this server. For local development, use <a href="https://ngrok.com" target="_blank" class="text-blue-600 hover:underline">ngrok</a> to expose this port over HTTPS.
+      </p>
+    </div>
+    <span class="shrink-0 text-xs px-2 py-1 rounded border {{ 'bg-emerald-50 text-emerald-800 border-emerald-200' if whatsapp_configured else 'bg-gray-50 text-gray-600 border-gray-300' }}">
+      {{ 'Connected' if whatsapp_configured else 'Not configured' }}
+    </span>
+  </div>
+  <form method="post" action="/settings" class="space-y-3 mt-4">
+    <input type="hidden" name="bot_name" value="{{ bot_name }}">
+    <input type="hidden" name="handoff_chat_id" value="{{ handoff_chat_id }}">
+    <input type="hidden" name="retrieval_threshold" value="{{ retrieval_threshold }}">
+    <input type="hidden" name="institution_type" value="{{ institution_type }}">
+    <input type="hidden" name="telegram_bot_token" value="{{ telegram_bot_token }}">
+    <div>
+      <label class="block text-sm font-medium text-gray-700">Twilio Account SID</label>
+      <input type="text" name="whatsapp_account_sid" value="{{ whatsapp_account_sid }}" maxlength="80"
+             placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+             class="mt-1 w-full text-sm font-mono border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700">Twilio Auth Token</label>
+      <p class="text-xs text-gray-500 mt-0.5">Leave empty to keep the existing value.</p>
+      <input type="password" name="whatsapp_auth_token" value="" maxlength="80" autocomplete="new-password"
+             placeholder="{% if whatsapp_configured %}•••••••••• (saved){% else %}your-auth-token{% endif %}"
+             class="mt-1 w-full text-sm font-mono border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700">From number</label>
+      <p class="text-xs text-gray-500 mt-0.5">The WhatsApp-enabled Twilio number. For the sandbox it's <code class="bg-gray-100 px-1 rounded">+14155238886</code>.</p>
+      <input type="text" name="whatsapp_from_number" value="{{ whatsapp_from_number }}" maxlength="40"
+             placeholder="+14155238886"
+             class="mt-1 w-full text-sm font-mono border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+    </div>
+    <div class="pt-1">
+      <button class="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded text-sm font-medium transition">Save WhatsApp settings</button>
+    </div>
+  </form>
+</div>
+
 {% if appointments_enabled %}
 <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
   <h2 class="text-lg font-medium mb-1">Working hours</h2>
