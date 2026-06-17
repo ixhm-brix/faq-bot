@@ -101,10 +101,37 @@ def _format_history(history: list[ChatMessage]) -> str:
     )
 
 
+# How well the retrieved context matches the question. The bot calibrates
+# its answer to this, on top of the grounding rules in the system prompt.
+_CONFIDENCE_HINT = {
+    "high": (
+        "Retrieval confidence: HIGH. The documents strongly match this "
+        "question — answer directly and confidently from the context."
+    ),
+    "medium": (
+        "Retrieval confidence: MEDIUM. The documents only partially match. "
+        "Answer ONLY what is clearly supported, keep it cautious, and don't "
+        "stretch the context to cover gaps. If a key detail is uncertain, say "
+        "so and offer to connect them with the team. If the question itself is "
+        "ambiguous, ask one short clarifying question instead of guessing."
+    ),
+    "low": (
+        "Retrieval confidence: LOW. The documents barely match this question. "
+        "Only answer if a specific fact in the context clearly and directly "
+        "answers it; otherwise emit the handoff token rather than guessing."
+    ),
+    "none": (
+        "Retrieval confidence: NONE. No relevant documents were found for this "
+        "question."
+    ),
+}
+
+
 def _build_user_prompt(
     question: str,
     chunks: list[RetrievedChunk],
     history: list[ChatMessage] | None = None,
+    confidence: str | None = None,
 ) -> str:
     if not chunks:
         context = "(no relevant documents found)"
@@ -112,8 +139,11 @@ def _build_user_prompt(
         context = "\n\n---\n\n".join(c.text for c in chunks)
 
     recent_conversation = _format_history(history or [])
+    hint = _CONFIDENCE_HINT.get(confidence or "", "")
+    hint_block = f"{hint}\n\n" if hint else ""
     return (
         f"Recent conversation from the last 12 hours:\n{recent_conversation}\n\n"
+        f"{hint_block}"
         f"Context:\n{context}\n\n"
         "Use the recent conversation to understand what the current question "
         "refers to, then answer using the context as the factual source.\n\n"
@@ -125,6 +155,7 @@ async def answer(
     question: str,
     chunks: list[RetrievedChunk],
     history: list[ChatMessage] | None = None,
+    confidence: str | None = None,
 ) -> str:
     response = await _get_client().chat.completions.create(
         model="deepseek-chat",
@@ -132,7 +163,7 @@ async def answer(
             {"role": "system", "content": _system_prompt()},
             {
                 "role": "user",
-                "content": _build_user_prompt(question, chunks, history),
+                "content": _build_user_prompt(question, chunks, history, confidence),
             },
         ],
         temperature=0.2,

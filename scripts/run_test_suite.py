@@ -80,8 +80,10 @@ async def main() -> None:
     for i, (q, sid) in enumerate(items, 1):
         start = time.time()
         followups = []
+        confidence = ""
         try:
             r = await chat.answer_message(sid, q)
+            confidence = r.confidence
             if r.is_security:
                 outcome, reply = "security", chat.build_security_reply()
             elif r.is_off_topic:
@@ -102,7 +104,7 @@ async def main() -> None:
         results.append({
             "n": i, "question": q, "reply": reply,
             "outcome": outcome, "chunks": chunks, "ms": ms,
-            "followups": followups,
+            "followups": followups, "confidence": confidence,
         })
         print(f"[{i}/{len(items)}] {outcome:9} {ms:5}ms  {q[:64]}")
 

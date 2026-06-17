@@ -47,7 +47,7 @@ from src.memory import (
     is_memory_question,
     remember_message,
 )
-from src.rag.retrieve import RetrievedChunk, retrieve
+from src.rag.retrieve import RetrievedChunk, confidence_for, retrieve
 from src.settings import get_suggested_questions
 
 
@@ -79,6 +79,11 @@ class AnswerResult:
     """The chunks that grounded the answer. Caller may pass these to
     src.llm.generate_followups() to render follow-up suggestion buttons."""
 
+    confidence: str = ""
+    """Retrieval confidence for this turn: "high" | "medium" | "low" |
+    "none" | "". Drives how cautiously the bot answered; surfaced in the
+    QA report. Empty for greeting/memory turns that skip retrieval."""
+
 
 async def answer_message(session_id: str, text: str) -> AnswerResult:
     """Run the full RAG + memory pipeline for one user turn.
@@ -98,7 +103,8 @@ async def answer_message(session_id: str, text: str) -> AnswerResult:
 
     retrieval_query = build_retrieval_query(text, history)
     chunks = retrieve(retrieval_query)
-    llm_reply = await answer(text, chunks, history)
+    confidence = confidence_for(chunks)
+    llm_reply = await answer(text, chunks, history, confidence=confidence)
 
     remember_message(session_id, "user", text)
 
@@ -111,17 +117,17 @@ async def answer_message(session_id: str, text: str) -> AnswerResult:
         return AnswerResult(text="", is_off_topic=True, chunks_used=[])
     if NO_CONTEXT_MARKER in llm_reply:
         # Nothing relevant in the docs at all → full handoff, no text.
-        return AnswerResult(text="", is_handoff=True, chunks_used=[])
+        return AnswerResult(text="", is_handoff=True, chunks_used=[], confidence=confidence)
     if SOFT_HANDOFF_MARKER in llm_reply:
         # Partial answer: the model gave related info but the exact answer
         # needs a human. Keep the helpful text AND flag the handoff.
         partial = _strip_markers(llm_reply)
         if not partial:
-            return AnswerResult(text="", is_handoff=True, chunks_used=[])
-        return AnswerResult(text=partial, is_handoff=True, chunks_used=chunks)
+            return AnswerResult(text="", is_handoff=True, chunks_used=[], confidence=confidence)
+        return AnswerResult(text=partial, is_handoff=True, chunks_used=chunks, confidence=confidence)
 
     remember_message(session_id, "assistant", llm_reply)
-    return AnswerResult(text=llm_reply, chunks_used=chunks)
+    return AnswerResult(text=llm_reply, chunks_used=chunks, confidence=confidence)
 
 
 def build_security_reply() -> str:
