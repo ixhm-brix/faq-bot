@@ -192,7 +192,11 @@ async def _process_question(bot: Bot, chat_id: int, user, text: str) -> None:
     chunks_used: list[RetrievedChunk] = []
     try:
         result = await chat.answer_message(str(chat_id), text)
-        if result.is_off_topic:
+        if result.is_security:
+            # Prompt-injection / jailbreak attempt — refuse, don't escalate.
+            final = chat.build_security_reply()
+            remember_message(chat_id, "assistant", final)
+        elif result.is_off_topic:
             # Off-topic questions don't get handed to staff — that would
             # waste their time. Polite decline only.
             final = chat.build_off_topic_reply()
@@ -207,13 +211,18 @@ async def _process_question(bot: Bot, chat_id: int, user, text: str) -> None:
             forwarded = await _forward_handoff_to_staff(
                 bot, user, text, handoff_id
             )
-            final = (
-                "I couldn't find that in our documents, so I've passed your "
-                "question to our team. Someone will get back to you shortly."
-                if forwarded
-                else "I couldn't find that in our documents. Your question has "
-                "been logged for our team to follow up on."
-            )
+            if result.text:
+                # Partial answer: give the user what we know; the team still
+                # gets the question to resolve the unknown part.
+                final = result.text
+            else:
+                final = (
+                    "I couldn't find that in our documents, so I've passed your "
+                    "question to our team. Someone will get back to you shortly."
+                    if forwarded
+                    else "I couldn't find that in our documents. Your question has "
+                    "been logged for our team to follow up on."
+                )
             # Channel-specific handoff phrasing — store it as the assistant
             # turn so the next message has accurate context.
             remember_message(chat_id, "assistant", final)

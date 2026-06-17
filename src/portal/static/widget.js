@@ -21,8 +21,12 @@
     .faqbot-panel.open { display: flex; }
     .faqbot-header { padding: 14px 16px; background: #2563eb; color: white; display: flex; align-items: center; justify-content: space-between; }
     .faqbot-header-name { font-weight: 600; font-size: 15px; }
-    .faqbot-close { background: transparent; border: none; color: white; cursor: pointer; font-size: 26px; line-height: 1; padding: 0 4px; opacity: .85; }
-    .faqbot-close:hover { opacity: 1; }
+    .faqbot-actions { display: flex; align-items: center; gap: 2px; }
+    .faqbot-icon { background: transparent; border: none; color: white; cursor: pointer; opacity: .85; padding: 5px; display: flex; border-radius: 7px; }
+    .faqbot-icon:hover { opacity: 1; background: rgba(255,255,255,.16); }
+    .faqbot-icon svg { width: 18px; height: 18px; }
+    .faqbot-close { background: transparent; border: none; color: white; cursor: pointer; font-size: 24px; line-height: 1; padding: 2px 6px; opacity: .85; border-radius: 7px; }
+    .faqbot-close:hover { opacity: 1; background: rgba(255,255,255,.16); }
     .faqbot-messages { flex: 1; overflow-y: auto; padding: 16px; background: #f9fafb; display: flex; flex-direction: column; gap: 8px; }
     .faqbot-msg { padding: 10px 14px; border-radius: 14px; max-width: 82%; word-wrap: break-word; font-size: 14px; line-height: 1.45; white-space: pre-wrap; }
     .faqbot-msg-bot { background: white; color: #111827; border: 1px solid #e5e7eb; align-self: flex-start; border-bottom-left-radius: 4px; }
@@ -38,6 +42,10 @@
     .faqbot-send { background: #2563eb; color: white; border: none; border-radius: 8px; padding: 9px 18px; font-weight: 500; cursor: pointer; font-family: inherit; font-size: 14px; }
     .faqbot-send:hover { background: #1d4ed8; }
     .faqbot-send:disabled { background: #93c5fd; cursor: not-allowed; }
+    .faqbot-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; align-self: stretch; }
+    .faqbot-chip { background: #fff; border: 1px solid #c7d2fe; color: #2563eb; border-radius: 100px; padding: 7px 12px; font-size: 12.5px; line-height: 1.2; cursor: pointer; font-family: inherit; text-align: left; transition: background .15s, border-color .15s; }
+    .faqbot-chip:hover { background: #eef2ff; border-color: #2563eb; }
+    .faqbot-chip:disabled { opacity: .5; cursor: default; }
     .faqbot-footer { padding: 6px 12px; text-align: center; font-size: 11px; color: #9ca3af; background: white; border-top: 1px solid #f3f4f6; }
     @media (max-width: 480px) {
       .faqbot-panel { bottom: 0; right: 0; width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
@@ -59,7 +67,12 @@
   panel.innerHTML = [
     '<div class="faqbot-header">',
     '  <span class="faqbot-header-name">Loading…</span>',
-    '  <button class="faqbot-close" aria-label="Close chat">×</button>',
+    '  <div class="faqbot-actions">',
+    '    <button class="faqbot-icon faqbot-download" aria-label="Download chat as PDF" title="Download chat as PDF">',
+    '      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>',
+    '    </button>',
+    '    <button class="faqbot-close" aria-label="Close chat">×</button>',
+    '  </div>',
     '</div>',
     '<div class="faqbot-messages" role="log" aria-live="polite"></div>',
     '<form class="faqbot-input-form">',
@@ -76,6 +89,12 @@
   const sendBtn = panel.querySelector('.faqbot-send');
 
   let configLoaded = false;
+  let botName = 'Assistant';
+  const transcript = [];
+
+  function nowTime() {
+    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
 
   function addMessage(role, text) {
     const m = document.createElement('div');
@@ -83,6 +102,60 @@
     m.textContent = text;
     messages.appendChild(m);
     messages.scrollTop = messages.scrollHeight;
+    transcript.push({ role: role, text: text, time: nowTime() });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  function downloadTranscript() {
+    if (transcript.length === 0) {
+      alert('No messages to download yet.');
+      return;
+    }
+    const rows = transcript.map(function (m) {
+      const who = m.role === 'user' ? 'You' : botName;
+      const cls = m.role === 'user' ? 'u' : 'b';
+      return '<div class="r ' + cls + '"><div class="bub"><div class="who">' +
+        escapeHtml(who) + '</div><div class="tx">' + escapeHtml(m.text) +
+        '</div><div class="ts">' + escapeHtml(m.time) + '</div></div></div>';
+    }).join('');
+    const exported = new Date().toLocaleString();
+    const html =
+      '<!doctype html><html><head><meta charset="utf-8">' +
+      '<title>Chat with ' + escapeHtml(botName) + '</title><style>' +
+      '*{box-sizing:border-box}' +
+      'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#111827;margin:0;background:#fff;padding:32px 28px 48px;max-width:720px;}' +
+      '.hd{border-bottom:2px solid #2563eb;padding-bottom:14px;margin-bottom:22px;}' +
+      '.hd h1{font-size:20px;margin:0 0 4px;color:#1e3a8a;}' +
+      '.hd p{margin:0;font-size:12px;color:#6b7280;}' +
+      '.r{display:flex;margin:10px 0;}' +
+      '.r.u{justify-content:flex-end;}' +
+      '.bub{max-width:78%;padding:10px 14px;border-radius:14px;font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;}' +
+      '.r.b .bub{background:#f3f4f6;border:1px solid #e5e7eb;border-bottom-left-radius:4px;}' +
+      '.r.u .bub{background:#2563eb;color:#fff;border-bottom-right-radius:4px;}' +
+      '.who{font-size:10.5px;font-weight:700;opacity:.7;margin-bottom:3px;}' +
+      '.ts{font-size:9.5px;opacity:.55;margin-top:5px;text-align:right;}' +
+      '.ft{margin-top:30px;padding-top:14px;border-top:1px solid #eee;font-size:11px;color:#9ca3af;text-align:center;}' +
+      '@media print{body{padding:0;}.r{break-inside:avoid;}}' +
+      '</style></head><body>' +
+      '<div class="hd"><h1>Conversation with ' + escapeHtml(botName) + '</h1>' +
+      '<p>Exported ' + escapeHtml(exported) + '</p></div>' +
+      rows +
+      '<div class="ft">Generated by the FAQ Assistant — choose “Save as PDF” in the print dialog.</div>' +
+      '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print();},250);};</scr' + 'ipt>' +
+      '</body></html>';
+    const w = window.open('', '_blank');
+    if (!w) {
+      alert('Please allow pop-ups for this site to download the chat.');
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
   }
 
   function showTyping() {
@@ -99,13 +172,37 @@
     if (t) t.remove();
   }
 
+  function removeChips() {
+    const c = messages.querySelector('.faqbot-chips');
+    if (c) c.remove();
+  }
+
+  function renderChips(list) {
+    removeChips();
+    if (!list || !list.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'faqbot-chips';
+    list.forEach(function (q) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'faqbot-chip';
+      b.textContent = q;
+      b.addEventListener('click', function () { sendText(q); });
+      wrap.appendChild(b);
+    });
+    messages.appendChild(wrap);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
   async function loadConfig() {
     try {
       const res = await fetch(API_BASE + '/widget/config');
       const cfg = await res.json();
-      headerName.textContent = cfg.bot_name || 'Assistant';
+      botName = cfg.bot_name || 'Assistant';
+      headerName.textContent = botName;
       if (messages.children.length === 0) {
         addMessage('bot', cfg.greeting || ('Hi! I\'m ' + (cfg.bot_name || 'your assistant') + '. How can I help?'));
+        renderChips(cfg.suggestions);
       }
       configLoaded = true;
     } catch (err) {
@@ -120,11 +217,12 @@
     setTimeout(() => input.focus(), 100);
   });
   panel.querySelector('.faqbot-close').addEventListener('click', () => panel.classList.remove('open'));
+  panel.querySelector('.faqbot-download').addEventListener('click', downloadTranscript);
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const text = input.value.trim();
+  async function sendText(text) {
+    text = (text || '').trim();
     if (!text) return;
+    removeChips();
     input.value = '';
     sendBtn.disabled = true;
     addMessage('user', text);
@@ -138,6 +236,7 @@
       const data = await res.json();
       hideTyping();
       addMessage('bot', data.reply || 'Sorry, something went wrong. Please try again.');
+      renderChips(data.followups);
     } catch (err) {
       hideTyping();
       addMessage('bot', 'Network error — please try again.');
@@ -145,5 +244,10 @@
       sendBtn.disabled = false;
       input.focus();
     }
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    sendText(input.value);
   });
 })();

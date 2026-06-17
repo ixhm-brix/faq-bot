@@ -1,3 +1,4 @@
+import json
 import logging
 import shutil
 from pathlib import Path
@@ -15,7 +16,7 @@ from src.config import (
     PORTAL_SESSION_SECRET,
 )
 from src import appointments, auth, chat, handoff, whatsapp
-from src.llm import generate_sample_questions
+from src.llm import generate_followups, generate_sample_questions
 from src.rag.ingest import ingest_pdf
 from src.rag.retrieve import RetrievedChunk
 from src.rag.store import get_collection
@@ -451,6 +452,24 @@ async def resolve_handoff(request: Request, handoff_id: int):
     )
 
 
+# --- Test report (temporary QA tool) -------------------------------------
+
+@app.get("/report", response_class=HTMLResponse)
+async def report(request: Request):
+    if not is_authed(request):
+        return RedirectResponse("/login", status_code=303)
+    report_path = Path("data/test_report.json")
+    data = None
+    if report_path.exists():
+        try:
+            data = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = None
+    return templates.TemplateResponse(
+        request, "report.html", {"user": request.session.get("user"), "data": data}
+    )
+
+
 # --- WhatsApp webhook (public, Twilio calls into it) ---------------------
 
 @app.post("/whatsapp/webhook")
@@ -480,7 +499,10 @@ async def whatsapp_webhook(request: Request):
 
     from src.memory import remember_message
 
-    if result.is_off_topic:
+    if result.is_security:
+        reply_text = chat.build_security_reply()
+        remember_message(inbound.session_id, "assistant", reply_text)
+    elif result.is_off_topic:
         reply_text = chat.build_off_topic_reply()
         remember_message(inbound.session_id, "assistant", reply_text)
     elif result.is_handoff:
@@ -490,7 +512,7 @@ async def whatsapp_webhook(request: Request):
             user_username=None,
             user_full_name=f"WhatsApp: {inbound.profile_name or inbound.from_number}",
         )
-        reply_text = (
+        reply_text = result.text or (
             "I couldn't find that in our documents, so I've logged your question "
             "for our team to follow up."
         )
@@ -540,6 +562,7 @@ async def widget_config():
         {
             "bot_name": name,
             "greeting": f"Hi! I'm {name}. How can I help?",
+            "suggestions": get_suggested_questions()[:6],
         }
     )
 
@@ -568,10 +591,15 @@ async def widget_chat(payload: WidgetMessage):
 
     from src.memory import remember_message
 
+    if result.is_security:
+        reply_text = chat.build_security_reply()
+        remember_message(full_session_id, "assistant", reply_text)
+        return JSONResponse({"reply": reply_text, "followups": []})
+
     if result.is_off_topic:
         reply_text = chat.build_off_topic_reply()
         remember_message(full_session_id, "assistant", reply_text)
-        return JSONResponse({"reply": reply_text})
+        return JSONResponse({"reply": reply_text, "followups": []})
 
     if result.is_handoff:
         handoff.record(
@@ -580,15 +608,22 @@ async def widget_chat(payload: WidgetMessage):
             user_username=None,
             user_full_name=f"Web visitor ({session_id[:8]})",
         )
-        reply_text = (
+        reply_text = result.text or (
             "I couldn't find that in our documents, so I've logged your question "
             "for our team to follow up. If you'd like a quicker answer, please "
             "leave us your email or contact us directly."
         )
         remember_message(full_session_id, "assistant", reply_text)
-        return JSONResponse({"reply": reply_text})
+        return JSONResponse({"reply": reply_text, "followups": []})
 
-    return JSONResponse({"reply": result.text})
+    # Grounded answer — offer the same follow-up suggestions the bot shows on
+    # Telegram, generated from the chunks this answer used.
+    try:
+        followups = await generate_followups(text, result.text, result.chunks_used)
+    except Exception:
+        log.exception("widget followups failed")
+        followups = []
+    return JSONResponse({"reply": result.text, "followups": followups})
 
 
 @app.post("/delete")

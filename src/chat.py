@@ -14,7 +14,32 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from src.llm import NO_CONTEXT_MARKER, OFF_TOPIC_MARKER, answer
+from src.llm import (
+    NO_CONTEXT_MARKER,
+    OFF_TOPIC_MARKER,
+    SECURITY_MARKER,
+    SOFT_HANDOFF_MARKER,
+    answer,
+)
+
+_ALL_MARKERS = (
+    SOFT_HANDOFF_MARKER,
+    NO_CONTEXT_MARKER,
+    OFF_TOPIC_MARKER,
+    SECURITY_MARKER,
+)
+
+
+def _strip_markers(text: str) -> str:
+    """Remove any control-marker lines/tokens the model left in a reply."""
+    kept = [
+        ln for ln in text.splitlines()
+        if ln.strip() not in _ALL_MARKERS
+    ]
+    cleaned = "\n".join(kept)
+    for marker in _ALL_MARKERS:
+        cleaned = cleaned.replace(marker, "")
+    return cleaned.strip()
 from src.memory import (
     build_memory_answer,
     build_retrieval_query,
@@ -44,6 +69,12 @@ class AnswerResult:
     image?'). Caller should politely decline WITHOUT escalating to
     staff — nobody at the org should be answering those."""
 
+    is_security: bool = False
+    """True when the message was a prompt-injection / jailbreak attempt
+    (override instructions, extract the system prompt or private docs,
+    obtain credentials). Caller refuses WITHOUT escalating, and may log
+    it separately for monitoring."""
+
     chunks_used: list[RetrievedChunk] = field(default_factory=list)
     """The chunks that grounded the answer. Caller may pass these to
     src.llm.generate_followups() to render follow-up suggestion buttons."""
@@ -71,15 +102,36 @@ async def answer_message(session_id: str, text: str) -> AnswerResult:
 
     remember_message(session_id, "user", text)
 
-    # Order matters: OFF_TOPIC takes precedence over NO_ANSWER_IN_DOCS so a
-    # model that emits both still routes to the polite decline.
+    # Order matters: SECURITY first (a jailbreak that also looks off-topic
+    # should be flagged as a security event), then OFF_TOPIC, then the
+    # full/partial handoff cases.
+    if SECURITY_MARKER in llm_reply:
+        return AnswerResult(text="", is_security=True, chunks_used=[])
     if OFF_TOPIC_MARKER in llm_reply:
         return AnswerResult(text="", is_off_topic=True, chunks_used=[])
     if NO_CONTEXT_MARKER in llm_reply:
+        # Nothing relevant in the docs at all → full handoff, no text.
         return AnswerResult(text="", is_handoff=True, chunks_used=[])
+    if SOFT_HANDOFF_MARKER in llm_reply:
+        # Partial answer: the model gave related info but the exact answer
+        # needs a human. Keep the helpful text AND flag the handoff.
+        partial = _strip_markers(llm_reply)
+        if not partial:
+            return AnswerResult(text="", is_handoff=True, chunks_used=[])
+        return AnswerResult(text=partial, is_handoff=True, chunks_used=chunks)
 
     remember_message(session_id, "assistant", llm_reply)
     return AnswerResult(text=llm_reply, chunks_used=chunks)
+
+
+def build_security_reply() -> str:
+    """Refusal for prompt-injection / jailbreak attempts. Polite, firm,
+    no escalation, and reveals nothing about the system."""
+    return (
+        "I can only help with questions about this organization, and I can't "
+        "share my internal instructions or any private information. "
+        "Is there something about our services I can help you with?"
+    )
 
 
 def build_off_topic_reply() -> str:
