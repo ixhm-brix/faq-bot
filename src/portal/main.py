@@ -1,3 +1,4 @@
+import hmac
 import json
 import logging
 import shutil
@@ -14,6 +15,7 @@ from src.config import (
     PORTAL_ADMIN_PASSWORD,
     PORTAL_ADMIN_USERNAME,
     PORTAL_SESSION_SECRET,
+    WIDGET_API_KEY,
 )
 from src import appointments, auth, chat, handoff, whatsapp
 from src.llm import generate_followups, generate_sample_questions
@@ -77,6 +79,12 @@ auth.bootstrap_admin(PORTAL_ADMIN_USERNAME, PORTAL_ADMIN_PASSWORD)
 # settings.json — don't bounce those admins to the /setup wizard on upgrade.
 from src.settings import auto_mark_setup_if_existing  # noqa: E402
 auto_mark_setup_if_existing()
+
+if not WIDGET_API_KEY:
+    log.warning(
+        "WIDGET_API_KEY is not set — POST /widget/chat is UNAUTHENTICATED. "
+        "Set WIDGET_API_KEY in .env to require an X-API-Key header."
+    )
 
 
 def is_authed(request: Request) -> bool:
@@ -568,8 +576,17 @@ async def widget_config():
 
 
 @app.post("/widget/chat")
-async def widget_chat(payload: WidgetMessage):
+async def widget_chat(request: Request, payload: WidgetMessage):
     """Process one message from a website visitor and return the bot's reply."""
+    # Shared-secret guard. When WIDGET_API_KEY is configured, callers must
+    # present it in X-API-Key; reject before doing any work otherwise. When
+    # it's unset we allow through (a startup warning was already logged) so
+    # local dev isn't broken.
+    if WIDGET_API_KEY:
+        provided = request.headers.get("X-API-Key") or ""
+        if not hmac.compare_digest(provided, WIDGET_API_KEY):
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
     text = (payload.text or "").strip()
     session_id = (payload.session_id or "").strip()
     if not session_id or not text:
