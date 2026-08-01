@@ -121,6 +121,13 @@
     <input type="hidden" name="handoff_chat_id" value="{{ handoff_chat_id }}">
     <input type="hidden" name="retrieval_threshold" value="{{ retrieval_threshold }}">
     <input type="hidden" name="institution_type" value="{{ institution_type }}">
+    <div class="mb-3">
+      <label class="block text-sm font-medium text-gray-700">Timezone</label>
+      <p class="text-xs text-gray-500 mt-0.5">IANA name (e.g. <code class="bg-gray-100 px-1 rounded">Africa/Kigali</code>, <code class="bg-gray-100 px-1 rounded">Europe/London</code>). The booking flow reads phrases like "tomorrow at 10am" and checks working hours in this zone.</p>
+      <input type="text" name="timezone" value="{{ timezone }}" maxlength="64"
+             placeholder="Africa/Kigali"
+             class="mt-2 w-64 text-sm font-mono border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+    </div>
     {% for day in weekdays %}
       {% set h = working_hours[day] %}
       <div class="flex items-center gap-3 text-sm">

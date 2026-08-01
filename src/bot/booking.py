@@ -33,6 +33,7 @@ from src import appointments
 from src.settings import (
     WEEKDAYS,
     get_handoff_chat_id,
+    get_timezone,
     get_working_hours,
     has_module,
 )
@@ -40,10 +41,12 @@ from src.settings import (
 log = logging.getLogger("bot.booking")
 router = Router(name="booking")
 
-# Use local (system) timezone for slot parsing — the bot is intended to run
-# wherever the org operates, and a Rwanda clinic typing "tomorrow 10am" means
-# their local 10am, not UTC.
-_LOCAL_TZ = ZoneInfo("Africa/Kigali")
+
+def _local_tz() -> ZoneInfo:
+    """The org's configured timezone. Slots are parsed and validated in this
+    zone — a clinic typing "tomorrow 10am" means their local 10am, not UTC.
+    Configurable in the portal; defaults to Africa/Kigali."""
+    return ZoneInfo(get_timezone())
 
 
 class BookingState(StatesGroup):
@@ -71,20 +74,22 @@ def _parse_slot(text: str) -> datetime | None:
     """Parse a natural-language slot like 'tomorrow at 10am' into an aware datetime
     in the local clinic timezone. Returns None if it can't be parsed or lies in
     the past."""
+    tz_name = get_timezone()
     parsed = dateparser.parse(
         text,
         settings={
             "PREFER_DATES_FROM": "future",
             "RETURN_AS_TIMEZONE_AWARE": True,
-            "TIMEZONE": "Africa/Kigali",
-            "TO_TIMEZONE": "Africa/Kigali",
+            "TIMEZONE": tz_name,
+            "TO_TIMEZONE": tz_name,
         },
     )
     if parsed is None:
         return None
+    local_tz = _local_tz()
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=_LOCAL_TZ)
-    if parsed <= datetime.now(_LOCAL_TZ):
+        parsed = parsed.replace(tzinfo=local_tz)
+    if parsed <= datetime.now(local_tz):
         return None
     return parsed
 

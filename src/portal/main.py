@@ -32,6 +32,7 @@ from src.settings import (
     get_retrieval_threshold,
     get_suggested_questions,
     get_telegram_bot_token,
+    get_timezone,
     get_whatsapp_account_sid,
     get_whatsapp_auth_token,
     get_whatsapp_from_number,
@@ -46,6 +47,7 @@ from src.settings import (
     set_retrieval_threshold,
     set_suggested_questions,
     set_telegram_bot_token,
+    set_timezone,
     set_whatsapp_settings,
     set_working_hours,
     whatsapp_configured,
@@ -285,6 +287,7 @@ async def dashboard(
             "whatsapp_from_number": get_whatsapp_from_number(),
             "whatsapp_public_url": get_whatsapp_public_url(),
             "whatsapp_configured": whatsapp_configured(),
+            "timezone": get_timezone(),
             "handoff_chat_id": get_handoff_chat_id() or "",
             "retrieval_threshold": f"{get_retrieval_threshold():.2f}",
             "open_handoffs": handoff.open_count(),
@@ -370,6 +373,8 @@ async def update_settings(request: Request):
         set_institution_type(form.get("institution_type", ""))
     if "telegram_bot_token" in form:
         set_telegram_bot_token(form.get("telegram_bot_token", ""))
+    if "timezone" in form and form.get("timezone"):
+        set_timezone(form.get("timezone", ""))
     if any(
         k in form
         for k in (

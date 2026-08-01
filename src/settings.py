@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 SETTINGS_PATH = Path("data/settings.json")
 DEFAULT_BOT_NAME = "FAQ Assistant"
@@ -222,6 +223,38 @@ def set_institution_type(raw: str) -> None:
 def has_module(module: str) -> bool:
     _, modules = INSTITUTION_TYPES[get_institution_type()]
     return module in modules
+
+
+# --- Timezone (used by the appointments module) --------------------------
+
+# The org's local timezone, as an IANA name (e.g. "Africa/Kigali",
+# "Europe/London"). The booking flow parses "tomorrow at 10am" and checks
+# it against working hours in this zone. Defaults to Africa/Kigali to match
+# the original single-tenant deployment.
+DEFAULT_TIMEZONE = "Africa/Kigali"
+
+
+def _valid_timezone(name: str) -> bool:
+    try:
+        ZoneInfo(name)
+        return True
+    except Exception:
+        return False
+
+
+def get_timezone() -> str:
+    val = _load().get("timezone", "")
+    val = val.strip() if isinstance(val, str) else ""
+    if val and _valid_timezone(val):
+        return val
+    return DEFAULT_TIMEZONE
+
+
+def set_timezone(raw: str) -> None:
+    data = _load()
+    v = (raw or "").strip()
+    data["timezone"] = v if _valid_timezone(v) else DEFAULT_TIMEZONE
+    _save(data)
 
 
 # --- Working hours (used by the appointments module) ---------------------
