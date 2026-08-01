@@ -1,7 +1,9 @@
 import asyncio
 import html as html_lib
 import logging
+import os
 import secrets
+import tempfile
 from collections import OrderedDict
 
 from aiogram import Bot, Dispatcher, F
@@ -16,6 +18,7 @@ from aiogram.types import (
 )
 
 from src import chat, handoff
+from src.transcribe import transcribe
 from src.bot.booking import (
     booking_start_keyboard,
     detect_booking_intent,
@@ -304,10 +307,57 @@ async def on_followup(callback: CallbackQuery) -> None:
     )
 
 
+# Registered BEFORE on_message so voice/audio notes route here instead of
+# hitting the text catch-all. StateFilter(None) keeps it out of the booking
+# FSM — a voice note mid-booking falls through to the booking router.
+@dp.message(StateFilter(None), F.voice | F.audio)
+async def on_voice(message: Message) -> None:
+    bot = message.bot
+    chat_id = message.chat.id
+    media = message.voice or message.audio
+    if media is None:
+        return
+
+    # Immediate feedback — the first transcription also loads the Whisper
+    # model (a one-time download), so this can take a few seconds.
+    try:
+        await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+    except Exception:
+        pass
+
+    tmp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+            tmp_path = tmp.name
+        await bot.download(media.file_id, destination=tmp_path)
+        text = await transcribe(tmp_path)
+    except Exception:
+        log.exception("Voice handling failed")
+        text = ""
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+    if not text:
+        await message.answer(
+            "Sorry, I couldn't make out that voice note. Could you try again, "
+            "or type your question?"
+        )
+        return
+
+    # Show what we heard so the user can catch a mis-transcription, then run
+    # the transcript through the exact same pipeline as a typed message.
+    await message.answer(f"\U0001F3A4 <i>I heard:</i> {html_lib.escape(text)}")
+    await _process_question(bot, chat_id, message.from_user, text)
+
+
 @dp.message(StateFilter(None))
 async def on_message(message: Message) -> None:
     if not message.text:
-        await message.answer("I can only handle text messages for now.")
+        await message.answer("I can only handle text and voice messages for now.")
         return
     await _process_question(
         message.bot, message.chat.id, message.from_user, message.text
