@@ -7,6 +7,11 @@ from src.settings import get_bot_name
 
 _client: AsyncOpenAI | None = None
 
+# DeepSeek chat model. "deepseek-v4-flash" is the cheaper/faster tier — good
+# for FAQ answering and the auxiliary suggestion generations. Switch to
+# "deepseek-v4-pro" here for higher-fidelity instruction following.
+DEEPSEEK_MODEL = "deepseek-v4-flash"
+
 NO_CONTEXT_MARKER = "NO_ANSWER_IN_DOCS"
 OFF_TOPIC_MARKER = "OFF_TOPIC"
 SECURITY_MARKER = "SECURITY_BLOCKED"
@@ -158,7 +163,7 @@ async def answer(
     confidence: str | None = None,
 ) -> str:
     response = await _get_client().chat.completions.create(
-        model="deepseek-chat",
+        model=DEEPSEEK_MODEL,
         messages=[
             {"role": "system", "content": _system_prompt()},
             {
@@ -197,7 +202,7 @@ async def generate_followups(
         f"Return only the questions, one per line, nothing else."
     )
     response = await _get_client().chat.completions.create(
-        model="deepseek-chat",
+        model=DEEPSEEK_MODEL,
         messages=[
             {
                 "role": "system",
@@ -245,7 +250,7 @@ async def generate_sample_questions(
         f"Return only the questions, one per line, nothing else."
     )
     response = await _get_client().chat.completions.create(
-        model="deepseek-chat",
+        model=DEEPSEEK_MODEL,
         messages=[
             {
                 "role": "system",
