@@ -13,6 +13,9 @@ their own keyspace, separate from Telegram chat_ids and widget UUIDs.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -36,6 +39,37 @@ class InboundMessage:
     profile_name: str  # WhatsApp display name (may be empty)
     text: str  # message body
     session_id: str  # "wa:+250788..." — pass to chat.answer_message
+
+
+def compute_twilio_signature(auth_token: str, url: str, params: dict[str, Any]) -> str:
+    """Recreate Twilio's X-Twilio-Signature for a webhook request.
+
+    Twilio's scheme (for POSTed form bodies): take the exact URL Twilio
+    called, append each POST param as key+value in ascending key order,
+    HMAC-SHA1 it with the account auth token, then base64-encode.
+    See https://www.twilio.com/docs/usage/security#validating-requests
+    """
+    data = url + "".join(f"{key}{params[key]}" for key in sorted(params))
+    digest = hmac.new(
+        auth_token.encode("utf-8"), data.encode("utf-8"), hashlib.sha1
+    ).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+
+def validate_twilio_request(
+    auth_token: str,
+    url: str,
+    params: dict[str, Any],
+    signature: str | None,
+) -> bool:
+    """Return True only if `signature` matches what our auth token would
+    produce for this URL + params. Constant-time comparison. A missing
+    auth token or signature fails closed — we never accept an unverifiable
+    request as genuine."""
+    if not auth_token or not signature:
+        return False
+    expected = compute_twilio_signature(auth_token, url, params)
+    return hmac.compare_digest(expected, signature)
 
 
 def parse_twilio_inbound(form: dict[str, Any]) -> InboundMessage | None:

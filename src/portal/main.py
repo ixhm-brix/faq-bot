@@ -32,7 +32,9 @@ from src.settings import (
     get_suggested_questions,
     get_telegram_bot_token,
     get_whatsapp_account_sid,
+    get_whatsapp_auth_token,
     get_whatsapp_from_number,
+    get_whatsapp_public_url,
     get_working_hours,
     has_module,
     is_setup_complete,
@@ -280,6 +282,7 @@ async def dashboard(
             "telegram_bot_token": get_telegram_bot_token(),
             "whatsapp_account_sid": get_whatsapp_account_sid(),
             "whatsapp_from_number": get_whatsapp_from_number(),
+            "whatsapp_public_url": get_whatsapp_public_url(),
             "whatsapp_configured": whatsapp_configured(),
             "handoff_chat_id": get_handoff_chat_id() or "",
             "retrieval_threshold": f"{get_retrieval_threshold():.2f}",
@@ -356,12 +359,19 @@ async def update_settings(request: Request):
     if "telegram_bot_token" in form:
         set_telegram_bot_token(form.get("telegram_bot_token", ""))
     if any(
-        k in form for k in ("whatsapp_account_sid", "whatsapp_auth_token", "whatsapp_from_number")
+        k in form
+        for k in (
+            "whatsapp_account_sid",
+            "whatsapp_auth_token",
+            "whatsapp_from_number",
+            "whatsapp_public_url",
+        )
     ):
         set_whatsapp_settings(
             form.get("whatsapp_account_sid", ""),
             form.get("whatsapp_auth_token", ""),
             form.get("whatsapp_from_number", ""),
+            form.get("whatsapp_public_url") if "whatsapp_public_url" in form else None,
         )
     if any(
         f"{day}_open" in form or f"{day}_close" in form or f"{day}_closed" in form
@@ -487,7 +497,21 @@ async def whatsapp_webhook(request: Request):
     asynchronously over the REST API rather than via TwiML so the bot can
     take its time."""
     form = await request.form()
-    inbound = whatsapp.parse_twilio_inbound(dict(form))
+    params = {k: v for k, v in form.items() if isinstance(v, str)}
+
+    # Verify the request really came from Twilio before doing any work.
+    # Twilio signs against the URL it was configured to call; behind a
+    # tunnel/proxy that differs from what we see, so prefer the admin-set
+    # public URL and fall back to the request's own URL.
+    signed_url = get_whatsapp_public_url() or str(request.url)
+    signature = request.headers.get("X-Twilio-Signature")
+    if not whatsapp.validate_twilio_request(
+        get_whatsapp_auth_token(), signed_url, params, signature
+    ):
+        log.warning("Rejected WhatsApp webhook with invalid/missing Twilio signature")
+        return JSONResponse({"status": "forbidden"}, status_code=403)
+
+    inbound = whatsapp.parse_twilio_inbound(params)
     if inbound is None:
         # Status callbacks, media-only, weird payloads — acknowledge and drop.
         return JSONResponse({"status": "ignored"})

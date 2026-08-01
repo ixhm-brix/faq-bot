@@ -153,13 +153,25 @@ def get_whatsapp_from_number() -> str:
     return val.strip() if isinstance(val, str) else ""
 
 
+def get_whatsapp_public_url() -> str:
+    """The exact public URL Twilio is configured to call for the webhook,
+    e.g. 'https://abc123.ngrok.io/whatsapp/webhook'. Used to validate the
+    request signature: Twilio signs against the URL it dialled, which can
+    differ from the URL the app sees behind a proxy/tunnel (http vs https,
+    internal host). Empty means 'trust the URL the request arrived on'."""
+    val = _load().get("whatsapp_public_url", "")
+    return val.strip() if isinstance(val, str) else ""
+
+
 def whatsapp_configured() -> bool:
     return all(
         [get_whatsapp_account_sid(), get_whatsapp_auth_token(), get_whatsapp_from_number()]
     )
 
 
-def set_whatsapp_settings(account_sid: str, auth_token: str, from_number: str) -> None:
+def set_whatsapp_settings(
+    account_sid: str, auth_token: str, from_number: str, public_url: str | None = None
+) -> None:
     data = _load()
     data["whatsapp_account_sid"] = (account_sid or "").strip()
     if auth_token and auth_token.strip():
@@ -170,6 +182,8 @@ def set_whatsapp_settings(account_sid: str, auth_token: str, from_number: str) -
     if from_number and not from_number.startswith("whatsapp:"):
         from_number = f"whatsapp:{from_number}"
     data["whatsapp_from_number"] = from_number
+    if public_url is not None:
+        data["whatsapp_public_url"] = public_url.strip()
     _save(data)
 
 
