@@ -3,6 +3,7 @@ import json
 import logging
 import shutil
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -308,39 +309,50 @@ async def dashboard(
 
 
 @app.post("/upload")
-async def upload(request: Request, file: UploadFile = File(...)):
+async def upload(request: Request, files: list[UploadFile] = File(...)):
     if not is_authed(request):
         return RedirectResponse("/login", status_code=303)
 
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        return RedirectResponse(
-            "/dashboard?error=Only+PDF+files+are+supported.", status_code=303
-        )
-
     PDF_DIR.mkdir(parents=True, exist_ok=True)
-    target = PDF_DIR / Path(file.filename).name
-    with target.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
 
-    try:
-        n_chunks = ingest_pdf(target)
-    except Exception as e:
-        log.exception("Ingest failed for %s", target.name)
-        return RedirectResponse(
-            f"/dashboard?error=Failed+to+ingest+{target.name}:+{e}",
-            status_code=303,
+    ingested: list[str] = []      # "name (N chunks)"
+    total_chunks = 0
+    skipped: list[str] = []       # "name (reason)"
+
+    for file in files:
+        name = Path(file.filename or "").name
+        if not name:
+            continue  # empty file input slot — ignore
+        if not name.lower().endswith(".pdf"):
+            skipped.append(f"{name} (not a PDF)")
+            continue
+        target = PDF_DIR / name
+        try:
+            with target.open("wb") as f:
+                shutil.copyfileobj(file.file, f)
+            n_chunks = ingest_pdf(target)
+        except Exception as e:
+            log.exception("Ingest failed for %s", name)
+            skipped.append(f"{name} ({e})")
+            continue
+        if n_chunks == 0:
+            skipped.append(f"{name} (no text — scanned PDFs need OCR)")
+            continue
+        ingested.append(f"{name} ({n_chunks} chunks)")
+        total_chunks += n_chunks
+
+    params: dict[str, str] = {}
+    if ingested:
+        params["message"] = (
+            f"Ingested {total_chunks} chunks from {len(ingested)} file"
+            f"{'' if len(ingested) == 1 else 's'}: {', '.join(ingested)}."
         )
+    if skipped:
+        params["error"] = "Skipped " + "; ".join(skipped)
+    if not params:
+        params["error"] = "No files were uploaded."
 
-    if n_chunks == 0:
-        return RedirectResponse(
-            f"/dashboard?error=No+text+extracted+from+{target.name}+(scanned+PDFs+need+OCR).",
-            status_code=303,
-        )
-
-    return RedirectResponse(
-        f"/dashboard?message=Ingested+{n_chunks}+chunks+from+{target.name}.",
-        status_code=303,
-    )
+    return RedirectResponse(f"/dashboard?{urlencode(params)}", status_code=303)
 
 
 @app.post("/settings")

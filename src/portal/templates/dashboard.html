@@ -147,10 +147,10 @@
 {% endif %}
 
 <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-  <h2 class="text-lg font-medium mb-1">Upload a PDF</h2>
-  <p class="text-xs text-gray-500 mb-3">Processing happens after upload and may take a few seconds for larger documents.</p>
+  <h2 class="text-lg font-medium mb-1">Upload PDFs</h2>
+  <p class="text-xs text-gray-500 mb-3">Select one or more PDFs — an FAQ can span several documents. Processing happens after upload and may take a few seconds per file. Re-uploading a file with the same name replaces its previous version.</p>
   <form method="post" action="/upload" enctype="multipart/form-data" class="flex items-center gap-3">
-    <input type="file" name="file" accept="application/pdf" required
+    <input type="file" name="files" accept="application/pdf" multiple required
            class="flex-1 text-sm file:mr-3 file:py-2 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-800 hover:file:bg-gray-200">
     <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium transition">Upload &amp; ingest</button>
   </form>
