@@ -24,10 +24,14 @@ KB_URL = os.getenv("KB_URL", "https://briqx.ninja/kb.txt")
 KB_FETCH_TIMEOUT = float(os.getenv("KB_FETCH_TIMEOUT", "10"))
 
 # --- Token management -----------------------------------------------------
-# Answers are meant to be two to four sentences; the cap is a hard stop, not a
-# target. Output tokens cost far more than cached input tokens, so this is the
-# most effective single ceiling on cost per message.
-MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "220"))
+# IMPORTANT: deepseek-v4-flash is a reasoning model. Its internal reasoning is
+# billed and counted inside this same budget, and it can run to several hundred
+# tokens before a single visible word is produced. Set this too low and the call
+# terminates with finish_reason="length" mid-reasoning, returning EMPTY content —
+# the visitor sees a blank bubble. Measured: a question needing deliberation used
+# ~1400 chars of reasoning plus ~340 of answer (409 completion tokens).
+# The 2-4 sentence limit is enforced by the prompt, not by this number.
+MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "800"))
 
 # Conversation window. Long history was the main silent token drain: every turn
 # re-sent the whole 12-hour transcript. Keep just enough for a follow-up like

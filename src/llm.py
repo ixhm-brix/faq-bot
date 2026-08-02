@@ -189,4 +189,19 @@ async def answer(question: str, history: list[ChatMessage] | None = None) -> str
         max_tokens=MAX_OUTPUT_TOKENS,
     )
     _log_usage(response)
-    return (response.choices[0].message.content or "").strip()
+
+    choice = response.choices[0]
+    text = (choice.message.content or "").strip()
+
+    # A reasoning model can burn the whole token budget thinking and return no
+    # visible content at all (finish_reason="length"). Never let that reach the
+    # visitor as an empty bubble — route it to the handoff, which is honest:
+    # we did not produce an answer, so a person should.
+    if not text:
+        log.warning(
+            "empty completion (finish_reason=%s) — routing to handoff",
+            choice.finish_reason,
+        )
+        return NO_CONTEXT_MARKER
+
+    return text
