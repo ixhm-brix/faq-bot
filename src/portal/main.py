@@ -1,11 +1,13 @@
+import hmac
 import json
 import logging
 import shutil
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
@@ -14,12 +16,11 @@ from src.config import (
     PORTAL_ADMIN_PASSWORD,
     PORTAL_ADMIN_USERNAME,
     PORTAL_SESSION_SECRET,
+    WIDGET_API_KEY,
 )
-from src import appointments, auth, chat, handoff, whatsapp
-from src.llm import generate_followups, generate_sample_questions
-from src.rag.ingest import ingest_pdf
-from src.rag.retrieve import RetrievedChunk
-from src.rag.store import get_collection
+from src import appointments, auth, chat, guards, handoff, handoff_link
+from src.kb import kb_is_stale, kb_text
+from src.llm import BOT_NAME
 from src.settings import (
     INSTITUTION_TYPES,
     WEEKDAYS,
@@ -29,8 +30,11 @@ from src.settings import (
     get_retrieval_threshold,
     get_suggested_questions,
     get_telegram_bot_token,
+    get_timezone,
     get_whatsapp_account_sid,
+    get_whatsapp_auth_token,
     get_whatsapp_from_number,
+    get_whatsapp_public_url,
     get_working_hours,
     has_module,
     is_setup_complete,
@@ -41,6 +45,7 @@ from src.settings import (
     set_retrieval_threshold,
     set_suggested_questions,
     set_telegram_bot_token,
+    set_timezone,
     set_whatsapp_settings,
     set_working_hours,
     whatsapp_configured,
@@ -78,55 +83,15 @@ auth.bootstrap_admin(PORTAL_ADMIN_USERNAME, PORTAL_ADMIN_PASSWORD)
 from src.settings import auto_mark_setup_if_existing  # noqa: E402
 auto_mark_setup_if_existing()
 
-
-def is_authed(request: Request) -> bool:
-    return bool(request.session.get("user"))
-
-
-def list_documents() -> list[dict]:
-    coll = get_collection()
-    if coll.count() == 0:
-        return []
-    result = coll.get()
-    counts: dict[str, int] = {}
-    for meta in result["metadatas"]:
-        src = meta.get("source", "?")
-        counts[src] = counts.get(src, 0) + 1
-    return sorted(
-        ({"source": s, "chunks": c} for s, c in counts.items()),
-        key=lambda d: d["source"],
+if not WIDGET_API_KEY:
+    log.warning(
+        "WIDGET_API_KEY is not set — POST /widget/chat is UNAUTHENTICATED. "
+        "Set WIDGET_API_KEY in .env to require an X-API-Key header."
     )
 
 
-async def refresh_suggestions() -> list[str]:
-    """Regenerate the bot's /start suggestion buttons based on current docs.
-
-    Called automatically after upload/delete and manually via the portal button.
-    Returns the new list of questions (may be empty if no docs or LLM failed).
-    """
-    coll = get_collection()
-    if coll.count() == 0:
-        set_suggested_questions([])
-        return []
-    sample = coll.get(limit=12)
-    chunks: list[RetrievedChunk] = []
-    for doc, meta in zip(sample["documents"], sample["metadatas"]):
-        if not doc:
-            continue
-        chunks.append(
-            RetrievedChunk(
-                text=doc,
-                source=(meta or {}).get("source", "?"),
-                distance=0.0,
-            )
-        )
-    try:
-        questions = await generate_sample_questions(chunks)
-    except Exception:
-        log.exception("Failed to generate sample questions")
-        return get_suggested_questions()
-    set_suggested_questions(questions)
-    return questions
+def is_authed(request: Request) -> bool:
+    return bool(request.session.get("user"))
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -267,12 +232,16 @@ async def dashboard(
         "dashboard.html",
         {
             "user": request.session.get("user"),
-            "documents": list_documents(),
+            "kb_chars": len(kb_text()),
+            "kb_stale": kb_is_stale(),
+            "api_calls_today": guards.breaker.status(),
             "bot_name": get_bot_name(),
             "telegram_bot_token": get_telegram_bot_token(),
             "whatsapp_account_sid": get_whatsapp_account_sid(),
             "whatsapp_from_number": get_whatsapp_from_number(),
+            "whatsapp_public_url": get_whatsapp_public_url(),
             "whatsapp_configured": whatsapp_configured(),
+            "timezone": get_timezone(),
             "handoff_chat_id": get_handoff_chat_id() or "",
             "retrieval_threshold": f"{get_retrieval_threshold():.2f}",
             "open_handoffs": handoff.open_count(),
@@ -296,42 +265,6 @@ async def dashboard(
     )
 
 
-@app.post("/upload")
-async def upload(request: Request, file: UploadFile = File(...)):
-    if not is_authed(request):
-        return RedirectResponse("/login", status_code=303)
-
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        return RedirectResponse(
-            "/dashboard?error=Only+PDF+files+are+supported.", status_code=303
-        )
-
-    PDF_DIR.mkdir(parents=True, exist_ok=True)
-    target = PDF_DIR / Path(file.filename).name
-    with target.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    try:
-        n_chunks = ingest_pdf(target)
-    except Exception as e:
-        log.exception("Ingest failed for %s", target.name)
-        return RedirectResponse(
-            f"/dashboard?error=Failed+to+ingest+{target.name}:+{e}",
-            status_code=303,
-        )
-
-    if n_chunks == 0:
-        return RedirectResponse(
-            f"/dashboard?error=No+text+extracted+from+{target.name}+(scanned+PDFs+need+OCR).",
-            status_code=303,
-        )
-
-    return RedirectResponse(
-        f"/dashboard?message=Ingested+{n_chunks}+chunks+from+{target.name}.",
-        status_code=303,
-    )
-
-
 @app.post("/settings")
 async def update_settings(request: Request):
     if not is_authed(request):
@@ -347,13 +280,22 @@ async def update_settings(request: Request):
         set_institution_type(form.get("institution_type", ""))
     if "telegram_bot_token" in form:
         set_telegram_bot_token(form.get("telegram_bot_token", ""))
+    if "timezone" in form and form.get("timezone"):
+        set_timezone(form.get("timezone", ""))
     if any(
-        k in form for k in ("whatsapp_account_sid", "whatsapp_auth_token", "whatsapp_from_number")
+        k in form
+        for k in (
+            "whatsapp_account_sid",
+            "whatsapp_auth_token",
+            "whatsapp_from_number",
+            "whatsapp_public_url",
+        )
     ):
         set_whatsapp_settings(
             form.get("whatsapp_account_sid", ""),
             form.get("whatsapp_auth_token", ""),
             form.get("whatsapp_from_number", ""),
+            form.get("whatsapp_public_url") if "whatsapp_public_url" in form else None,
         )
     if any(
         f"{day}_open" in form or f"{day}_close" in form or f"{day}_closed" in form
@@ -472,66 +414,6 @@ async def report(request: Request):
 
 # --- WhatsApp webhook (public, Twilio calls into it) ---------------------
 
-@app.post("/whatsapp/webhook")
-async def whatsapp_webhook(request: Request):
-    """Twilio WhatsApp webhook. Twilio sends application/x-www-form-urlencoded
-    on every incoming message and expects a quick 200 — we reply
-    asynchronously over the REST API rather than via TwiML so the bot can
-    take its time."""
-    form = await request.form()
-    inbound = whatsapp.parse_twilio_inbound(dict(form))
-    if inbound is None:
-        # Status callbacks, media-only, weird payloads — acknowledge and drop.
-        return JSONResponse({"status": "ignored"})
-
-    try:
-        result = await chat.answer_message(inbound.session_id, inbound.text)
-    except Exception:
-        log.exception("WhatsApp chat.answer_message failed")
-        try:
-            await whatsapp.send_message(
-                inbound.from_number,
-                "Sorry, something went wrong on our side. Please try again in a moment.",
-            )
-        except Exception:
-            log.exception("Failed to send WhatsApp error reply")
-        return JSONResponse({"status": "error"}, status_code=200)
-
-    from src.memory import remember_message
-
-    if result.is_security:
-        reply_text = chat.build_security_reply()
-        remember_message(inbound.session_id, "assistant", reply_text)
-    elif result.is_off_topic:
-        reply_text = chat.build_off_topic_reply()
-        remember_message(inbound.session_id, "assistant", reply_text)
-    elif result.is_handoff:
-        handoff.record(
-            question=inbound.text,
-            user_chat_id=0,
-            user_username=None,
-            user_full_name=f"WhatsApp: {inbound.profile_name or inbound.from_number}",
-        )
-        reply_text = result.text or (
-            "I couldn't find that in our documents, so I've logged your question "
-            "for our team to follow up."
-        )
-        remember_message(inbound.session_id, "assistant", reply_text)
-    else:
-        reply_text = result.text
-
-    try:
-        await whatsapp.send_message(inbound.from_number, reply_text)
-    except RuntimeError as e:
-        log.error("WhatsApp not configured: %s", e)
-    except Exception:
-        log.exception("Failed to send WhatsApp reply")
-
-    return JSONResponse({"status": "ok"})
-
-
-# --- Website widget (public, embeddable) ----------------------------------
-
 class WidgetMessage(BaseModel):
     session_id: str
     text: str
@@ -539,9 +421,18 @@ class WidgetMessage(BaseModel):
 
 @app.get("/widget.js")
 async def widget_js():
-    """Embeddable JavaScript that injects the floating chat button."""
-    return FileResponse(
-        STATIC_DIR / "widget.js",
+    """Embeddable JavaScript that injects the floating chat button.
+
+    WIDGET_API_KEY is substituted in here rather than shipped in the static file.
+    It is not a secret — anything the browser sends is readable in devtools — it
+    just stops other sites casually embedding this widget against our API budget.
+    The controls that actually bound spend are the per-IP rate limit and the
+    global daily breaker in src/guards.py.
+    """
+    source = (STATIC_DIR / "widget.js").read_text(encoding="utf-8")
+    source = source.replace("__WIDGET_API_KEY__", WIDGET_API_KEY or "")
+    return Response(
+        source,
         media_type="application/javascript",
         headers={"Cache-Control": "public, max-age=300"},
     )
@@ -556,38 +447,84 @@ async def widget_demo():
 
 @app.get("/widget/config")
 async def widget_config():
-    """Public configuration the widget needs at load time."""
-    name = get_bot_name()
+    """Public configuration the widget needs at load time.
+
+    The name is frozen in llm.BOT_NAME rather than read from portal settings —
+    it is baked into the cached system prefix, so a rename would invalidate the
+    prompt cache for every visitor. Suggestions are fixed to the questions the
+    knowledge base actually answers well.
+    """
     return JSONResponse(
         {
-            "bot_name": name,
-            "greeting": f"Hi! I'm {name}. How can I help?",
-            "suggestions": get_suggested_questions()[:6],
+            "bot_name": BOT_NAME,
+            "greeting": (
+                f"I am {BOT_NAME}. Ask me anything about what we build, what it "
+                "costs, or how long it takes — I answer from our published "
+                "prices and FAQ."
+            ),
+            "suggestions": [
+                "What does a website cost?",
+                "How long does it take?",
+                "Do I own everything?",
+                "Can I pay in parts?",
+            ],
+            "whatsapp": handoff_link.whatsapp_url(),
         }
     )
 
 
 @app.post("/widget/chat")
-async def widget_chat(payload: WidgetMessage):
-    """Process one message from a website visitor and return the bot's reply."""
+async def widget_chat(request: Request, payload: WidgetMessage):
+    """One message from a website visitor.
+
+    Ordered so the cheap rejections happen first and never reach the paid API:
+    auth -> shape -> local pre-filter -> per-IP rate limit -> global daily
+    breaker -> DeepSeek. See src/guards.py.
+    """
+    if WIDGET_API_KEY:
+        provided = request.headers.get("X-API-Key") or ""
+        if not hmac.compare_digest(provided, WIDGET_API_KEY):
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
     text = (payload.text or "").strip()
     session_id = (payload.session_id or "").strip()
     if not session_id or not text:
+        return JSONResponse({"reply": "Please send a non-empty message."}, status_code=400)
+
+    # Free: greetings, thanks, junk and over-length never cost an API call.
+    canned = guards.reject_locally(text)
+    if canned:
+        return JSONResponse({"reply": canned, "followups": []})
+
+    client_ip = (request.client.host if request.client else "") or "unknown"
+    if not guards.rate_limiter.allow(client_ip):
         return JSONResponse(
-            {"reply": "Please send a non-empty message."}, status_code=400
+            {
+                "reply": "You have sent a lot of messages in a short time. Give it a "
+                "moment, or reach a person on WhatsApp.",
+                "whatsapp": handoff_link.whatsapp_url(text),
+                "followups": [],
+            },
+            status_code=429,
         )
 
-    # Prefix the session id so it can't collide with Telegram chat_ids in
-    # the shared conversation_memory table.
+    # Global ceiling. Per-IP limits do not bound total spend when a caller rotates
+    # addresses; this does. The widget stays useful when it trips — it shows
+    # published content and the human handoff.
+    if guards.breaker.is_open():
+        log.warning("daily API cap reached (%s calls) — serving offline card", guards.breaker.used)
+        return JSONResponse(handoff_link.offline_card(text))
+
+    # Prefix so widget sessions cannot collide with anything else in the
+    # shared conversation_memory table.
     full_session_id = f"web:{session_id[:64]}"
 
+    guards.breaker.record()
     try:
         result = await chat.answer_message(full_session_id, text)
     except Exception:
         log.exception("widget_chat failed")
-        return JSONResponse(
-            {"reply": "Sorry, something went wrong on our side. Please try again."}
-        )
+        return JSONResponse(handoff_link.offline_card(text))
 
     from src.memory import remember_message
 
@@ -608,59 +545,16 @@ async def widget_chat(payload: WidgetMessage):
             user_username=None,
             user_full_name=f"Web visitor ({session_id[:8]})",
         )
-        reply_text = result.text or (
-            "I couldn't find that in our documents, so I've logged your question "
-            "for our team to follow up. If you'd like a quicker answer, please "
-            "leave us your email or contact us directly."
-        )
+        reply_text = result.text or handoff_link.HANDOFF_MESSAGE
         remember_message(full_session_id, "assistant", reply_text)
-        return JSONResponse({"reply": reply_text, "followups": []})
+        return JSONResponse(
+            {
+                "reply": reply_text,
+                "whatsapp": handoff_link.whatsapp_url(text),
+                "followups": [],
+            }
+        )
 
-    # Grounded answer — offer the same follow-up suggestions the bot shows on
-    # Telegram, generated from the chunks this answer used.
-    try:
-        followups = await generate_followups(text, result.text, result.chunks_used)
-    except Exception:
-        log.exception("widget followups failed")
-        followups = []
-    return JSONResponse({"reply": result.text, "followups": followups})
-
-
-@app.post("/delete")
-async def delete(request: Request, source: str = Form(...)):
-    if not is_authed(request):
-        return RedirectResponse("/login", status_code=303)
-
-    coll = get_collection()
-    coll.delete(where={"source": source})
-
-    pdf_file = PDF_DIR / source
-    if pdf_file.exists():
-        pdf_file.unlink()
-
-    return RedirectResponse(
-        f"/dashboard?message=Deleted+{source}.", status_code=303
-    )
+    return JSONResponse({"reply": result.text, "followups": []})
 
 
-@app.post("/suggestions/refresh")
-async def refresh_suggestions_route(request: Request):
-    if not is_authed(request):
-        return RedirectResponse("/login", status_code=303)
-    questions = await refresh_suggestions()
-    if questions:
-        msg = f"Regenerated+{len(questions)}+suggestions.+Edit+if+you+want+then+Save."
-    else:
-        msg = "Could+not+generate+suggestions+(no+docs+or+LLM+error)."
-    return RedirectResponse(f"/dashboard?message={msg}", status_code=303)
-
-
-@app.post("/suggestions")
-async def save_suggestions(request: Request, suggestions: str = Form("")):
-    if not is_authed(request):
-        return RedirectResponse("/login", status_code=303)
-    items = [line.strip() for line in suggestions.splitlines() if line.strip()]
-    set_suggested_questions(items[:6])
-    return RedirectResponse(
-        "/dashboard?message=Suggestions+saved.", status_code=303
-    )

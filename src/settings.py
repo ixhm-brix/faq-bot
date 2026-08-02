@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 SETTINGS_PATH = Path("data/settings.json")
 DEFAULT_BOT_NAME = "FAQ Assistant"
@@ -153,13 +154,25 @@ def get_whatsapp_from_number() -> str:
     return val.strip() if isinstance(val, str) else ""
 
 
+def get_whatsapp_public_url() -> str:
+    """The exact public URL Twilio is configured to call for the webhook,
+    e.g. 'https://abc123.ngrok.io/whatsapp/webhook'. Used to validate the
+    request signature: Twilio signs against the URL it dialled, which can
+    differ from the URL the app sees behind a proxy/tunnel (http vs https,
+    internal host). Empty means 'trust the URL the request arrived on'."""
+    val = _load().get("whatsapp_public_url", "")
+    return val.strip() if isinstance(val, str) else ""
+
+
 def whatsapp_configured() -> bool:
     return all(
         [get_whatsapp_account_sid(), get_whatsapp_auth_token(), get_whatsapp_from_number()]
     )
 
 
-def set_whatsapp_settings(account_sid: str, auth_token: str, from_number: str) -> None:
+def set_whatsapp_settings(
+    account_sid: str, auth_token: str, from_number: str, public_url: str | None = None
+) -> None:
     data = _load()
     data["whatsapp_account_sid"] = (account_sid or "").strip()
     if auth_token and auth_token.strip():
@@ -170,6 +183,8 @@ def set_whatsapp_settings(account_sid: str, auth_token: str, from_number: str) -
     if from_number and not from_number.startswith("whatsapp:"):
         from_number = f"whatsapp:{from_number}"
     data["whatsapp_from_number"] = from_number
+    if public_url is not None:
+        data["whatsapp_public_url"] = public_url.strip()
     _save(data)
 
 
@@ -208,6 +223,38 @@ def set_institution_type(raw: str) -> None:
 def has_module(module: str) -> bool:
     _, modules = INSTITUTION_TYPES[get_institution_type()]
     return module in modules
+
+
+# --- Timezone (used by the appointments module) --------------------------
+
+# The org's local timezone, as an IANA name (e.g. "Africa/Kigali",
+# "Europe/London"). The booking flow parses "tomorrow at 10am" and checks
+# it against working hours in this zone. Defaults to Africa/Kigali to match
+# the original single-tenant deployment.
+DEFAULT_TIMEZONE = "Africa/Kigali"
+
+
+def _valid_timezone(name: str) -> bool:
+    try:
+        ZoneInfo(name)
+        return True
+    except Exception:
+        return False
+
+
+def get_timezone() -> str:
+    val = _load().get("timezone", "")
+    val = val.strip() if isinstance(val, str) else ""
+    if val and _valid_timezone(val):
+        return val
+    return DEFAULT_TIMEZONE
+
+
+def set_timezone(raw: str) -> None:
+    data = _load()
+    v = (raw or "").strip()
+    data["timezone"] = v if _valid_timezone(v) else DEFAULT_TIMEZONE
+    _save(data)
 
 
 # --- Working hours (used by the appointments module) ---------------------

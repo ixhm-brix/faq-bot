@@ -1,4 +1,10 @@
 (function () {
+  // Substituted server-side when this file is served. Note this is NOT a secret:
+  // anything the browser sends is visible in devtools. Its job is to stop other
+  // sites casually embedding this widget, not to authenticate a visitor. Real
+  // spend protection is the per-IP rate limit and the daily circuit breaker.
+  const WIDGET_KEY = '__WIDGET_API_KEY__';
+
   if (window.__FAQBOT_WIDGET_LOADED__) return;
   window.__FAQBOT_WIDGET_LOADED__ = true;
 
@@ -46,6 +52,12 @@
     .faqbot-chip { background: #fff; border: 1px solid #c7d2fe; color: #2563eb; border-radius: 100px; padding: 7px 12px; font-size: 12.5px; line-height: 1.2; cursor: pointer; font-family: inherit; text-align: left; transition: background .15s, border-color .15s; }
     .faqbot-chip:hover { background: #eef2ff; border-color: #2563eb; }
     .faqbot-chip:disabled { opacity: .5; cursor: default; }
+    .faqbot-chip-wa { text-decoration: none; border-color: #25d366; color: #128c4a; font-weight: 600; }
+    .faqbot-chip-wa:hover { background: #e8fbf0; border-color: #128c4a; }
+    .faqbot-offline { font-size: 12.5px; line-height: 1.45; }
+    .faqbot-offline-title { font-weight: 600; margin: 6px 0 3px; }
+    .faqbot-offline ul { margin: 0 0 4px; padding-left: 16px; }
+    .faqbot-offline li { margin-bottom: 3px; }
     .faqbot-footer { padding: 6px 12px; text-align: center; font-size: 11px; color: #9ca3af; background: white; border-top: 1px solid #f3f4f6; }
     @media (max-width: 480px) {
       .faqbot-panel { bottom: 0; right: 0; width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
@@ -219,6 +231,56 @@
   panel.querySelector('.faqbot-close').addEventListener('click', () => panel.classList.remove('open'));
   panel.querySelector('.faqbot-download').addEventListener('click', downloadTranscript);
 
+  function renderWhatsapp(url) {
+    const wrap = document.createElement('div');
+    wrap.className = 'faqbot-chips';
+    const a = document.createElement('a');
+    a.className = 'faqbot-chip faqbot-chip-wa';
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = 'Ask a person on WhatsApp';
+    wrap.appendChild(a);
+    messages.appendChild(wrap);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function renderOfflineCard(data) {
+    const card = document.createElement('div');
+    card.className = 'faqbot-msg faqbot-bot faqbot-offline';
+
+    if (data.prices && data.prices.length) {
+      const h = document.createElement('div');
+      h.className = 'faqbot-offline-title';
+      h.textContent = 'What we charge';
+      card.appendChild(h);
+      const ul = document.createElement('ul');
+      data.prices.forEach(function (p) {
+        const li = document.createElement('li');
+        li.textContent = p;
+        ul.appendChild(li);
+      });
+      card.appendChild(ul);
+    }
+
+    if (data.questions && data.questions.length) {
+      const h2 = document.createElement('div');
+      h2.className = 'faqbot-offline-title';
+      h2.textContent = 'Questions we are asked';
+      card.appendChild(h2);
+      const ul2 = document.createElement('ul');
+      data.questions.forEach(function (q) {
+        const li = document.createElement('li');
+        li.textContent = q;
+        ul2.appendChild(li);
+      });
+      card.appendChild(ul2);
+    }
+
+    messages.appendChild(card);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
   async function sendText(text) {
     text = (text || '').trim();
     if (!text) return;
@@ -230,12 +292,20 @@
     try {
       const res = await fetch(API_BASE + '/widget/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: WIDGET_KEY
+          ? { 'Content-Type': 'application/json', 'X-API-Key': WIDGET_KEY }
+          : { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId, text: text }),
       });
       const data = await res.json();
       hideTyping();
       addMessage('bot', data.reply || 'Sorry, something went wrong. Please try again.');
+      // Offline card: the service is unreachable, over quota, or the daily cap
+      // tripped. We DISPLAY published content — we never try to answer locally,
+      // because a wrong guess at a price is worse than no answer.
+      if (data.offline) renderOfflineCard(data);
+      // Handoff to a human. WhatsApp is a person, not a second bot.
+      if (data.whatsapp) renderWhatsapp(data.whatsapp);
       renderChips(data.followups);
     } catch (err) {
       hideTyping();
