@@ -1,0 +1,100 @@
+# briqx — knowledge base
+
+briqx is a software studio in Kigali, Rwanda. Websites, online stores and software for Rwandan business.
+
+## What we charge
+
+- Launch (package 01) — 400,000 RWF, live in 1 week. Currently discounted from 500,000 RWF, a saving of 100,000 RWF. Get online. Look like a real business. Includes 8 written guarantees.
+- Visibility (package 02) — 600,000 RWF, live in 2 weeks. Currently discounted from 750,000 RWF, a saving of 150,000 RWF. Be the one Google sends customers to. Includes 8 written guarantees. This is the most commonly chosen package.
+- E-Commerce (package 03) — 1,300,000 RWF, live in 3 weeks. Currently discounted from 1,500,000 RWF, a saving of 200,000 RWF. Sell online. Real payments. Real growth. Includes 9 written guarantees.
+- Custom Software (package 04) — from 1,600,000 RWF. Your idea, built exactly the way you work.
+- Mobile App (package 05) — from 1,700,000 RWF. One app for Android and iOS.
+- AI assistant (package 06) — Priced once we see your material. An FAQ bot on your website that answers customers in your voice — or a private one behind your login, so staff stop hunting through files for the same answer.
+
+Prices are in Rwandan francs (RWF). Payment is 50% to begin and 50% on sign-off.
+
+## What each package includes
+
+Each package contains everything in the one below it.
+
+Foundation:
+- Domain and DNS, registered in your name — included in: Launch, Visibility, E-Commerce.
+- Hosting with SSL — HTTPS from day one — included in: Launch, Visibility, E-Commerce.
+- Multi-page website — home, services, about, contact, blog — included in: Launch, Visibility, E-Commerce.
+- Mobile-first, under 2 seconds on Rwandan mobile — included in: Launch, Visibility, E-Commerce.
+
+Getting found:
+- Full SEO — included in: Visibility, E-Commerce.
+- Google Business Profile, verified in your name — included in: Visibility, E-Commerce.
+- Reviews pipeline — included in: Visibility, E-Commerce.
+- Admin dashboard your team runs without a developer — included in: Visibility, E-Commerce.
+
+Selling:
+- Storefront — browse, search, filter, cart, checkout — included in: E-Commerce.
+- MoMo accepted at checkout — included in: E-Commerce.
+- Catalogue with categories, photos and variants — included in: E-Commerce.
+- Live stock counts, discount codes, promotions — included in: E-Commerce.
+
+## What we build
+
+- Websites (From 400,000 RWF): Multi-page sites that load in under two seconds on a Rwandan phone, on a domain and host registered to you.
+- Google presence (From 600,000 RWF): A Business Profile verified in your name, set up properly, plus the review flow that keeps it climbing in local results.
+- Online stores (From 1,300,000 RWF): A storefront built for how Rwandans actually shop, with MoMo at checkout, live stock, variants and discount codes.
+- Admin dashboards (Included from Visibility): The back office your staff run themselves — orders, stock, content and hours — without calling a developer to change a price.
+- Mobile apps (From 1,700,000 RWF): One build that ships to both Android and iOS, scoped and quoted against how your business actually works.
+- AI assistants (Quoted per project): Retrieval-trained on your own documents and catalogue. Put it on your site to answer customers, or keep it internal so your team can ask instead of searching.
+
+## How a build runs
+
+Packaged builds run to a fixed calendar. You know the finish line before you pay the first half.
+- Launch: 1 week to live.
+- Visibility: 2 weeks to live.
+- E-Commerce: 3 weeks to live.
+
+- First message — You tell us what you need. You get back a price, a date, and the first name of the developer who would build it. No discovery call required to find out what it costs.
+- Day one — Everything is registered in your name. Half up front, and the domain, the hosting and the Google Business Profile are created under your details that same day. You hold the accounts while we are still building.
+- Build — You watch it happen. One week, two or three depending on the package. You get a link you can open and share at any point, not a reveal at the end.
+- Handover — The rest on sign-off. Second half when it is live and you are happy. Every credential is already yours, so handover is a conversation, not a migration.
+
+## Where we stand
+
+- Published: Every price we charge is on this page. You do not need a meeting to find out what something costs.
+- Written: Your date goes into the agreement. A commitment, not an estimate.
+- In your name: Domain, hosting and Google account registered to you on day one — not handed over at the end.
+- No lock-in: Leave whenever you like. You take all of it and nothing stops working.
+
+- Starts at: 400,000 RWF (published, never “it depends”).
+- Live in: 1–3 weeks (written into the agreement).
+- You keep: All of it (domain · code · accounts).
+
+## Questions we are asked
+
+Q: How long does a build actually take?
+A: Launch is one week, Visibility two, E-Commerce three. Those dates go into the agreement, so they are commitments rather than estimates. Custom software and mobile apps are scoped individually — you still get a named date before you pay anything.
+
+Q: Do I really own everything afterwards?
+A: Yes, and you own it from the first day rather than the last. The domain, the hosting, the Google Business Profile and every login are created in your name at the start. There is no lock-in: if you leave, you take all of it and nothing stops working.
+
+Q: Can I pay in parts?
+A: Half to start, half when it is live and you have signed off. Nothing is held hostage in between — the accounts are already yours.
+
+Q: What if I need a change after we launch?
+A: Small changes you make yourself from the dashboard — that is what it is there for. Anything bigger, message us and you get a price and a date for it, same as any other build. There is nothing to sign up to and nothing running in the background.
+
+Q: Do you work outside Kigali?
+A: Yes, anywhere in Rwanda. Most of the process runs over WhatsApp and calls, so where you are does not change the price or the date.
+
+Q: Is my business too small for this?
+A: Launch exists for exactly that — one week and 400,000 RWF for a real domain and a proper site. If people are already searching for what you sell, being findable matters more than being big.
+
+Q: How do I take MoMo payments on my site?
+A: It is built into the E-Commerce package. Checkout accepts Mobile Money the way your customers already pay, and orders and payment status show up in your dashboard. You do not need a developer to run it.
+
+Q: How do I rank on Google Maps in Kigali?
+A: A verified and complete Business Profile, the same details everywhere you appear online, a fast site Google can read, and a steady flow of genuine reviews. That is what the Visibility package is built to do.
+
+Q: What is a RAG assistant, in plain terms?
+A: A chat assistant that reads your own material — price lists, policies, catalogue, past answers — before it replies, so it quotes your business instead of inventing something. Put it on your website as an FAQ bot that answers customers at two in the morning, or keep it behind your login so staff can ask it instead of digging through files. Either way it is quoted per project, once we have seen what it needs to read.
+
+Q: Why publish your prices when nobody else does?
+A: Because a hidden price is a negotiation you are set up to lose. Ours are on this page. If a project genuinely falls outside them, we say so and quote it before you commit.

@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.config import HISTORY_CHAR_CAP, HISTORY_TURNS
+
 MEMORY_DB_PATH = Path("data/conversation_memory.sqlite3")
 MEMORY_TTL_SECONDS = 12 * 60 * 60
 MAX_HISTORY_MESSAGES = 20
@@ -52,7 +54,19 @@ def cleanup_expired(now: float | None = None) -> None:
 
 
 def get_recent_messages(chat_id: int | str) -> list[ChatMessage]:
+    """The conversation window sent to the model: last HISTORY_TURNS exchanges.
+
+    This used to return up to 20 messages spanning 12 hours, and every one of them
+    was re-sent on every request — the single largest silent token drain in the
+    service, and it grew the longer someone chatted. A few turns is all that is
+    needed to resolve "what about the second one?"; anything older is answered
+    just as well from the knowledge base, which is sent in full regardless.
+
+    Two caps apply, whichever bites first: a message count, and a total character
+    budget so one pasted wall of text cannot blow the window open.
+    """
     cleanup_expired()
+    limit = max(2, HISTORY_TURNS * 2)
     with _connect() as conn:
         rows = conn.execute(
             """
@@ -62,14 +76,20 @@ def get_recent_messages(chat_id: int | str) -> list[ChatMessage]:
             ORDER BY created_at DESC, id DESC
             LIMIT ?
             """,
-            (str(chat_id), _cutoff(), MAX_HISTORY_MESSAGES),
+            (str(chat_id), _cutoff(), limit),
         ).fetchall()
 
-    messages = [
-        ChatMessage(role=role, content=content, created_at=created_at)
-        for role, content, created_at in rows
-    ]
-    return list(reversed(messages))
+    # rows are newest-first; keep newest and walk back until the budget is spent
+    kept: list[ChatMessage] = []
+    budget = HISTORY_CHAR_CAP
+    for role, content, created_at in rows:
+        text = content or ""
+        if len(text) > budget:
+            break
+        budget -= len(text)
+        kept.append(ChatMessage(role=role, content=text, created_at=created_at))
+
+    return list(reversed(kept))
 
 
 def remember_message(chat_id: int | str, role: str, content: str) -> None:
